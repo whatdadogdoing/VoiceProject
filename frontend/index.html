@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Auth</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+    <symbol id="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/>
+        <path d="M19 11a7 7 0 0 1-14 0"/>
+        <line x1="12" y1="18" x2="12" y2="22"/>
+        <line x1="8" y1="22" x2="16" y2="22"/>
+    </symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="m8.5 12.5 2.5 2.5 4.5-5"/>
+    </symbol>
+    <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <line x1="12" y1="8" x2="12" y2="12.5"/>
+        <circle cx="12" cy="15.8" r="0.6" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+        <path d="M21 3v5h-5"/>
+        <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+        <path d="M3 21v-5h5"/>
+    </symbol>
+</svg>
+
+<div class="card">
+
+    <div class="card-header" id="app-header" hidden>
+        <span class="app-title">Voice Auth</span>
+        <button type="button" class="btn-link" id="btn-logout-header">Đăng xuất</button>
+    </div>
+
+    <!-- Đăng nhập -->
+    <div class="step active" id="step-auth">
+        <h1>Đăng nhập</h1>
+        <p class="subtitle">Xác thực bằng giọng nói cho tài khoản của bạn.</p>
+        <div class="field">
+            <label for="auth-email">Email</label>
+            <input type="email" id="auth-email" placeholder="you@example.com">
+        </div>
+        <div class="field">
+            <label for="auth-password">Mật khẩu</label>
+            <input type="password" id="auth-password" placeholder="••••••••">
+        </div>
+        <button class="btn-primary" id="btn-login">Đăng nhập</button>
+        <button class="btn-secondary" id="btn-register">Đăng ký tài khoản mới</button>
+        <div class="status" id="status-auth"></div>
+    </div>
+
+    <!-- Consent -->
+    <div class="step" id="step-consent">
+        <h1>Xác thực bằng giọng nói</h1>
+        <p class="subtitle">Trước khi tiếp tục, vui lòng đọc và đồng ý với chính sách sau:</p>
+        <ul class="list-plain">
+            <li>Chúng tôi không lưu file âm thanh gốc của bạn.</li>
+            <li>Voiceprint được xử lý và lưu trữ cục bộ trên hệ thống của chúng tôi, không chia sẻ cho bên thứ ba.</li>
+            <li>Bạn có thể rút lại đồng ý bất cứ lúc nào, dữ liệu voiceprint sẽ bị xoá khỏi hệ thống.</li>
+            <li>Tuân thủ Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân.</li>
+        </ul>
+        <button class="btn-primary" id="btn-accept-consent">Tôi đồng ý</button>
+        <button class="btn-secondary" id="btn-decline-consent">Không đồng ý</button>
+    </div>
+
+    <!-- Enroll -->
+    <div class="step" id="step-enroll">
+        <h1>Đăng ký giọng nói</h1>
+        <p class="subtitle">Hãy đọc to câu bên dưới &mdash; mẫu <span id="enroll-sample-num">1</span>/3</p>
+
+        <div class="progress" aria-hidden="true">
+            <div class="progress-seg"></div>
+            <div class="progress-seg"></div>
+            <div class="progress-seg"></div>
+        </div>
+
+        <div class="mic-field">
+            <label for="enroll-mic-select">Micro</label>
+            <select id="enroll-mic-select"></select>
+            <div class="mic-meter"><div class="mic-meter-fill" id="enroll-mic-meter-fill"></div></div>
+        </div>
+
+        <div class="phrase-wrap">
+            <div class="phrase-box" id="enroll-phrase-box"></div>
+            <button class="btn-icon-ghost" id="btn-enroll-reshuffle" type="button" aria-label="Đổi câu khác" title="Đổi câu khác">
+                <svg class="icon"><use href="#icon-refresh"/></svg>
+            </button>
+        </div>
+        <p class="hint">Từ sẽ sáng dần khi được nhận diện &mdash; cần trình duyệt hỗ trợ Web Speech API (Chrome/Edge).</p>
+
+        <button class="btn-primary" id="btn-record-sample"></button>
+        <div class="status" id="status"></div>
+
+        <div id="enroll-preview" style="display:none">
+            <audio id="enroll-audio-preview" controls></audio>
+            <div class="btn-row">
+                <button class="btn-secondary" id="btn-enroll-redo">Ghi âm lại</button>
+                <button class="btn-primary" id="btn-enroll-confirm">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Verify -->
+    <div class="step" id="step-verify">
+        <h1>Xác thực giọng nói</h1>
+        <p class="subtitle">Hãy đọc to câu bên dưới để xác thực.</p>
+
+        <div class="mic-field">
+            <label for="verify-mic-select">Micro</label>
+            <select id="verify-mic-select"></select>
+            <div class="mic-meter"><div class="mic-meter-fill" id="verify-mic-meter-fill"></div></div>
+        </div>
+
+        <div class="phrase-wrap">
+            <div class="phrase-box" id="verify-phrase-box"></div>
+            <button class="btn-icon-ghost" id="btn-verify-reshuffle" type="button" aria-label="Đổi câu khác" title="Đổi câu khác">
+                <svg class="icon"><use href="#icon-refresh"/></svg>
+            </button>
+        </div>
+        <p class="hint">Từ sẽ sáng dần khi được nhận diện &mdash; cần trình duyệt hỗ trợ Web Speech API (Chrome/Edge).</p>
+
+        <div class="btn-row">
+            <button class="btn-primary" id="btn-start-verify"></button>
+            <button class="btn-secondary" id="btn-stop-verify" disabled>Xong</button>
+        </div>
+        <div class="status" id="status-verify"></div>
+
+        <div class="verify-recovery" id="verify-recovery" hidden>
+            <p class="hint">Giọng nói không nhận diện được sau nhiều lần thử?</p>
+            <button class="btn-link" id="btn-verify-recovery" type="button">Bạn có muốn đăng ký lại giọng nói không?</button>
+        </div>
+
+        <div id="verify-preview" style="display:none">
+            <audio id="verify-audio-preview" controls></audio>
+            <div class="btn-row">
+                <button class="btn-secondary" id="btn-verify-redo">Ghi âm lại</button>
+                <button class="btn-primary" id="btn-verify-confirm">Gửi xác thực</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OTP -->
+    <div class="step" id="step-otp">
+        <h1>Nhập mã xác thực</h1>
+        <p class="subtitle">Mã OTP đã được gửi về email của bạn. Có hiệu lực trong <span id="otp-timer">5:00</span>.</p>
+        <div class="otp-boxes" id="otp-boxes">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1" autocomplete="one-time-code">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1">
+            <input type="text" class="otp-box" inputmode="numeric" maxlength="1">
+        </div>
+        <button class="btn-secondary" id="btn-resend-otp">Gửi lại mã</button>
+        <div class="status" id="status-otp"></div>
+    </div>
+
+    <!-- Success -->
+    <div class="step" id="step-success">
+        <h1>Đăng nhập thành công</h1>
+        <p class="subtitle" id="success-subtitle">Xác thực bằng giọng nói và OTP đã hoàn tất.</p>
+        <button class="btn-secondary" id="btn-reverify">Xác thực lại giọng nói</button>
+        <button class="btn-secondary" id="btn-reenroll">Đăng ký lại giọng nói</button>
+    </div>
+
+    <div class="card-footer">Voice Auth</div>
+</div>
+
+<script src="voice-recorder.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

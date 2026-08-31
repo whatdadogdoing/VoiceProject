@@ -1,0 +1,21 @@
+services:
+  attack:
+    build: .
+    volumes:
+      - ./reference:/app/reference:ro
+      - ./output:/app/output
+      - vixtts_model:/app/model
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - BACKEND_URL=http://backend:8000
+
+networks:
+  default:
+    name: voiceproject_default
+    external: true
+
+volumes:
+  vixtts_model:
+  hf_cache:

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake Voice Lab</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="card">
+    <h1>Fake Voice Lab</h1>
+    <p class="subtitle">Công cụ tự kiểm tra: nhân bản giọng nói của chính bạn và thử xem hệ thống xác thực có phát hiện được không.</p>
+
+    <section class="block">
+        <h2>1. Mẫu giọng nói tham chiếu</h2>
+        <p class="hint">Ghi âm khoảng 10-15 giây, nói chuyện bình thường bằng tiếng Việt.</p>
+        <button class="btn-primary" id="btn-record">Bắt đầu ghi âm</button>
+        <div class="status" id="status-reference"></div>
+        <audio id="reference-preview" controls style="display:none"></audio>
+    </section>
+
+    <section class="block">
+        <h2>2. Giả giọng nói</h2>
+        <textarea id="fake-text" placeholder="Nhập câu bạn muốn giọng giả đọc..." rows="3"></textarea>
+        <button class="btn-primary" id="btn-synthesize">Tạo giọng giả</button>
+        <div class="status" id="status-synthesize"></div>
+        <audio id="fake-preview" controls style="display:none"></audio>
+    </section>
+
+    <section class="block">
+        <h2>3. Gửi vào hệ thống xác thực</h2>
+        <p class="hint">Đăng nhập bằng tài khoản thật của bạn trên hệ thống xác thực, sau đó gửi giọng giả để xem có bị phát hiện không.</p>
+
+        <div id="attack-login">
+            <input type="email" id="attack-email" placeholder="Email tài khoản">
+            <input type="password" id="attack-password" placeholder="Mật khẩu">
+            <button class="btn-secondary" id="btn-attack-login">Đăng nhập vào hệ thống xác thực</button>
+        </div>
+
+        <div id="attack-ready" style="display:none">
+            <p class="hint">Đã đăng nhập: <span id="attack-email-display"></span></p>
+            <button class="btn-primary" id="btn-attack-send">Gửi giọng giả đến hệ thống xác thực</button>
+        </div>
+
+        <div class="status" id="status-attack"></div>
+        <div id="attack-result" style="display:none"></div>
+    </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

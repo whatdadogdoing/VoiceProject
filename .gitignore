@@ -1,0 +1,19 @@
+# secrets
+.env
+security-tests/.env
+
+# python
+__pycache__/
+*.pyc
+
+# downloaded/generated at runtime - not source
+fake-voice-lab/data/
+security-tests/reference/
+security-tests/output/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/

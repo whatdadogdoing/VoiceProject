@@ -1,0 +1,14 @@
+services:
+  fakevoice:
+    build: .
+    ports:
+      - "5001:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTH_BACKEND_URL=http://backend:8000
+
+networks:
+  default:
+    name: voiceproject_default
+    external: true
