@@ -1,6 +1,7 @@
 services:
   fakevoice:
     build: .
+    init: true  # torch/OpenMP can leave zombie children; a real PID 1 reaps them
     ports:
       - "5001:8000"
     volumes:
