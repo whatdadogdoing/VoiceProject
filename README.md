@@ -34,7 +34,7 @@ Frontend: `http://localhost:3000`. The backend isn't exposed directly — everyt
 `fake-voice-lab/` is a standalone tool (own Dockerfile, own port) for answering one question: *if someone got a short recording of my voice, could they clone it and beat my own anti-spoofing model?*
 
 - Record a reference clip of your own voice.
-- Type any sentence and hear it synthesized in that voice (via [viXTTS](https://huggingface.co/capleaf/viXTTS), a Vietnamese fine-tune of Coqui XTTS-v2), just to gauge clone quality.
+- Type any sentence and hear it synthesized in that voice (via [VieNeu-TTS](https://github.com/pnnbao97/VieNeu-TTS), a Vietnamese zero-shot voice cloner with a torch-free CPU/ONNX path — picked after a heavier Coqui XTTS-based clone caused severe swap thrashing on this hardware), just to gauge clone quality.
 - Log in with your real account and fire the cloned voice at the actual `/verify` endpoint — it fetches the live random challenge phrase, clones exactly that phrase, and submits it, showing whether AASIST-L catches it.
 
 Run it with `docker compose up -d` from inside `fake-voice-lab/` (it joins the main app's Docker network to reach the real backend). Only ever point this at an account you own.
