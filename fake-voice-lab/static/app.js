@@ -76,7 +76,60 @@ qs('btn-synthesize').onclick = async () => {
     const blob = await res.blob();
     qs('fake-preview').src = URL.createObjectURL(blob);
     qs('fake-preview').style.display = 'block';
+    qs('save-row').style.display = 'flex';
     setStatus(qs('status-synthesize'), 'Đã tạo xong, nhấn nút bên dưới để nghe thử.', 'success');
+};
+
+// ---------- Save to disk ----------
+
+qs('btn-save').onclick = async () => {
+    const format = qs('save-format').value;
+    const btn = qs('btn-save');
+    btn.disabled = true;
+    setStatus(qs('status-synthesize'), 'Đang chuẩn bị file...', '');
+
+    const res = await fetch(`/api/download?format=${encodeURIComponent(format)}`);
+    btn.disabled = false;
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatus(qs('status-synthesize'), data.detail || 'Không tải được file.', 'error');
+        return;
+    }
+
+    const blob = await res.blob();
+    const filename = `fake_voice.${format}`;
+
+    if (window.showSaveFilePicker) {
+        // lets the user pick any folder + filename via the native Save dialog
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: 'Audio file', accept: { [blob.type]: [`.${format}`] } }]
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            setStatus(qs('status-synthesize'), 'Đã lưu file.', 'success');
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                setStatus(qs('status-synthesize'), 'Lưu file thất bại.', 'error');
+            }
+        }
+    } else {
+        // fallback for browsers without the File System Access API (Firefox,
+        // Safari): a normal download -- the browser's own "ask where to save
+        // each file" setting decides whether a folder picker appears
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setStatus(qs('status-synthesize'), 'Đã tải file xuống.', 'success');
+    }
 };
 
 // ---------- Attack ----------

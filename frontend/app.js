@@ -303,8 +303,13 @@ async function startVerifyUI() {
 }
 
 // shown only once a verify attempt has actually failed; a fresh login starts clean
+let recoveryPurpose = 'reenroll'; // 'reenroll' (voice not cooperating) | 'unlock' (fraud lock)
+
 function resetVerifyRecoveryPrompt() {
     qs('verify-recovery').hidden = true;
+    recoveryPurpose = 'reenroll';
+    qs('verify-recovery-hint').textContent = 'Giọng nói không nhận diện được sau nhiều lần thử?';
+    qs('btn-verify-recovery').textContent = 'Bạn có muốn đăng ký lại giọng nói không?';
 }
 
 qs('btn-verify-reshuffle').onclick = async () => {
@@ -390,6 +395,13 @@ qs('btn-verify-confirm').onclick = async () => {
         verifyBlob = null;
         await startVerifyUI();
         setStatus(qs('status-verify'), verifyFailureMessage(data), 'error');
+        recoveryPurpose = data.reason === 'fraud_lockout' ? 'unlock' : 'reenroll';
+        qs('verify-recovery-hint').textContent = recoveryPurpose === 'unlock'
+            ? 'Tài khoản đã bị khoá do nghi ngờ tấn công.'
+            : 'Giọng nói không nhận diện được sau nhiều lần thử?';
+        qs('btn-verify-recovery').textContent = recoveryPurpose === 'unlock'
+            ? 'Xác thực qua email để mở khoá'
+            : 'Bạn có muốn đăng ký lại giọng nói không?';
         qs('verify-recovery').hidden = false;
     }
 };
@@ -407,7 +419,7 @@ function verifyFailureMessage(data) {
         case 'spoofing_detected':
             return `Bạn có đang dùng bản ghi âm hoặc giọng giả không? Nếu bạn cố tình dùng cách này để vượt qua xác thực, hệ thống sẽ xử lý nghiêm túc. Còn ${data.tries_left} lần thử.`;
         case 'fraud_lockout':
-            return `Xác thực giọng nói đã bị tạm khoá do nghi ngờ gian lận nhiều lần. Vui lòng thử lại sau ${data.lockout_minutes} phút.`;
+            return 'Phát hiện dấu hiệu tấn công giả mạo giọng nói nghiêm trọng. Tài khoản đã bị khoá xác thực giọng nói cho đến khi bạn xác thực lại qua email.';
         case 'rate_limit_exceeded':
             return 'Bạn đã thử quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.';
         default:
@@ -498,9 +510,13 @@ async function submitOtp() {
         resetVerifyRecoveryPrompt();
         recorder.closeMic();
 
-        qs('success-subtitle').textContent = otpMode === 'recovery'
-            ? 'Xác thực qua email đã hoàn tất. Bạn có thể đăng ký lại giọng nói bên dưới.'
-            : 'Xác thực bằng giọng nói và OTP đã hoàn tất.';
+        if (otpMode === 'recovery') {
+            qs('success-subtitle').textContent = recoveryPurpose === 'unlock'
+                ? 'Xác thực qua email đã hoàn tất. Tài khoản đã được mở khoá, bạn có thể xác thực lại giọng nói bên dưới.'
+                : 'Xác thực qua email đã hoàn tất. Bạn có thể đăng ký lại giọng nói bên dưới.';
+        } else {
+            qs('success-subtitle').textContent = 'Xác thực bằng giọng nói và OTP đã hoàn tất.';
+        }
         showStep('step-success');
     } else {
         setStatus(qs('status-otp'), 'Mã OTP không hợp lệ hoặc đã hết hạn.', 'error');

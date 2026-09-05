@@ -99,6 +99,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 audio { width: 100%; margin-top: 10px; height: 34px; filter: invert(1) grayscale(1) contrast(0.9); border-radius: var(--radius-sm); }
 
+.save-row { display: flex; gap: 8px; margin-top: 10px; }
+.save-row select { width: auto; flex: 0 0 auto; margin-bottom: 0; }
+.save-row button { margin-bottom: 0; }
+
 #attack-result {
     margin-top: 10px;
     padding: 12px;

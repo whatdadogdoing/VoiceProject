@@ -28,6 +28,16 @@ app = FastAPI(title="Fake Voice Lab")
 
 _tts = None
 _attack_state = {"session_token": None, "email": None}
+_last_wav_bytes: bytes | None = None
+
+DOWNLOAD_FORMATS = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "mp4": "audio/mp4",
+    "m4a": "audio/mp4",
+    "ogg": "audio/ogg",
+    "flac": "audio/flac",
+}
 
 
 def load_model():
@@ -67,8 +77,38 @@ async def reference_status():
 
 @app.post("/api/synthesize")
 async def synthesize(text: str = Form(...)):
+    global _last_wav_bytes
     wav_bytes = await asyncio.to_thread(synthesize_wav, text)
+    _last_wav_bytes = wav_bytes
     return Response(content=wav_bytes, media_type="audio/wav")
+
+
+@app.get("/api/download")
+async def download(format: str = "wav"):
+    if _last_wav_bytes is None:
+        raise HTTPException(400, "Chưa có giọng giả nào được tạo")
+
+    fmt = format.lower()
+    if fmt not in DOWNLOAD_FORMATS:
+        raise HTTPException(400, f"Định dạng không hỗ trợ: {format}")
+
+    if fmt == "wav":
+        data = _last_wav_bytes
+    else:
+        segment = AudioSegment.from_file(io.BytesIO(_last_wav_bytes), format="wav")
+        # export to a real file, not an in-memory pipe: the mp4/m4a muxer needs
+        # to seek back to write its header, which fails on a non-seekable pipe
+        export_format = "ipod" if fmt in ("mp4", "m4a") else fmt  # ffmpeg's muxer name for m4a/mp4 audio
+        with tempfile.NamedTemporaryFile(suffix=f".{fmt}") as tmp:
+            segment.export(tmp.name, format=export_format)
+            tmp.seek(0)
+            data = tmp.read()
+
+    return Response(
+        content=data,
+        media_type=DOWNLOAD_FORMATS[fmt],
+        headers={"Content-Disposition": f'attachment; filename="fake_voice.{fmt}"'}
+    )
 
 
 @app.post("/api/attack/login")

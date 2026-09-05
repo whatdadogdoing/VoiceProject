@@ -1,13 +1,20 @@
 from models.db import count_recent_failures, count_recent_fraud_failures
+from services.redis_client import get_redis
 
 MAX_FAILURES = 5
 
-# Spoofing is treated as a suspected-fraud signal, not an honest mistake, so it
-# gets its own much stricter counter and a longer lockout window than the
-# general retry limit above (which covers things like a bad mic or a misread
-# phrase, where people can just try again).
+# Spoofing is treated as a suspected active attack, not an honest mistake: 3
+# detections within the window below trips a lock that does NOT expire on its
+# own -- unlike the general retry limit above (which just covers a bad mic or
+# a misread phrase), an attacker shouldn't be able to just wait this out. The
+# only way out is a successful recovery-OTP verify (see
+# routers/voice_auth.py's verify_recovery_otp, which clears the lock key).
 MAX_FRAUD_ATTEMPTS = 3
-FRAUD_LOCKOUT_MINUTES = 30
+FRAUD_DETECTION_WINDOW_MINUTES = 30
+
+
+def fraud_lock_key(user_id: str) -> str:
+    return f"fraud_locked:{user_id}"
 
 
 async def evaluate(
@@ -21,13 +28,15 @@ async def evaluate(
     if recent_failures >= MAX_FAILURES:
         return "rejected", "rate_limit_exceeded", {}
 
-    recent_fraud = await count_recent_fraud_failures(user_id, minutes=FRAUD_LOCKOUT_MINUTES)
-    if recent_fraud >= MAX_FRAUD_ATTEMPTS:
-        return "rejected", "fraud_lockout", {"lockout_minutes": FRAUD_LOCKOUT_MINUTES}
+    if await get_redis().exists(fraud_lock_key(user_id)):
+        return "rejected", "fraud_lockout", {}
 
     if spoof_score >= 0.5:
-        tries_left = MAX_FRAUD_ATTEMPTS - recent_fraud - 1
-        return "rejected", "spoofing_detected", {"tries_left": tries_left}
+        recent_fraud = await count_recent_fraud_failures(user_id, minutes=FRAUD_DETECTION_WINDOW_MINUTES)
+        if recent_fraud + 1 >= MAX_FRAUD_ATTEMPTS:
+            await get_redis().set(fraud_lock_key(user_id), "1")
+            return "rejected", "fraud_lockout", {}
+        return "rejected", "spoofing_detected", {"tries_left": MAX_FRAUD_ATTEMPTS - recent_fraud - 1}
 
     if voiceprint_score < 0.7:
         return "rejected", "voiceprint_mismatch", {}

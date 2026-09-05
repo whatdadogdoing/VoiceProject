@@ -5,7 +5,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, D
 from services.speaker_verification import embed, cosine_similarity, adapt_embedding
 from services.anti_spoofing import analyze
 from services.audio import to_wav_pcm16, is_too_quiet
-from services.risk_engine import evaluate
+from services.risk_engine import evaluate, fraud_lock_key
 from services.otp import send_otp, verify_otp
 from services.token import create_access_token
 from services.consent import has_active_consent, record_consent, revoke_consent
@@ -176,9 +176,10 @@ async def verify_otp_endpoint(request: Request, code: str, user_id: str = Depend
 @router.post("/recovery/otp/send")
 @limiter.limit("3/minute")
 async def send_recovery_otp(request: Request, user_id: str = Depends(get_current_user_id)):
-    """When voice verification won't cooperate for the account owner, email
-    OTP alone (on top of the password session already required to get here)
-    is accepted as a fallback path to re-enrollment."""
+    """When voice verification won't cooperate for the account owner -- either
+    it keeps failing, or a suspected-fraud lock has closed off voice attempts
+    entirely -- email OTP alone (on top of the password session already
+    required to get here) is accepted as a fallback path."""
     email = await get_user_email(user_id)
     if not email:
         raise HTTPException(404, "User không tồn tại")
@@ -192,6 +193,10 @@ async def verify_recovery_otp(request: Request, code: str, user_id: str = Depend
     ok = await verify_otp(user_id, code)
     if not ok:
         raise HTTPException(401, "OTP không hợp lệ hoặc đã hết hạn")
+
+    # a successful recovery OTP proves ownership regardless of why it was
+    # needed, so it also lifts a suspected-fraud lock if one is active
+    await get_redis().delete(fraud_lock_key(user_id))
 
     token = create_access_token(user_id, ["recovery", "otp"])
     return {"access_token": token, "token_type": "bearer"}
