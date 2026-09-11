@@ -139,13 +139,15 @@ Run with `docker compose up -d` from inside `fake-voice-lab/` — it joins the m
 
 ### Why VieNeu-TTS?
 
-Getting a working Vietnamese voice clone on this hardware (2-core CPU, 12GB RAM, no GPU) took three attempts:
+Most open Vietnamese voice-cloning models are built on large architectures that assume a GPU is available, which makes them a poor fit for a fully local, CPU-only deployment (2 cores, 12GB RAM, no GPU here) — the kind of environment this project targets so the whole stack, including the attack lab, can run on a single ordinary machine. Three candidates were evaluated before finding one that actually holds up under that constraint:
 
 | # | Model | What happened | Verdict |
 |---|---|---|---|
-| 1 | **viXTTS** (Coqui XTTS-v2 fine-tune) | Cloned convincingly, but one inference call caused **31GB** of swap-thrashing disk I/O | ❌ Unusable on this hardware |
-| 2 | **v-tts / VALTEC-TTS** | Advertised as lightweight (74.8M params) | ❌ Model weights 401'd — the hosting repo isn't actually public |
-| 3 | **VieNeu-TTS** | Torch-free ONNX CPU path, ~285MB footprint | ✅ **~14s/sentence, reliable, works alongside the main stack** |
+| 1 | **viXTTS** (Coqui XTTS-v2 fine-tuned for Vietnamese) | Produced convincing clones, but XTTS-v2's pipeline (a GPT-style acoustic model plus a vocoder) is heavy without GPU offload — a single inference call pushed memory usage high enough to trigger **31GB** of swap, thrashing disk I/O until the process became unusable | ❌ Needs a GPU to be practical |
+| 2 | **v-tts / VALTEC-TTS** | Advertised as a lightweight alternative (~74.8M parameters, small enough for CPU inference) | ❌ The model weights returned an HTTP 401 — the hosting repository isn't actually publicly downloadable despite being advertised as open |
+| 3 | **VieNeu-TTS** | Ships a torch-free ONNX CPU inference path with a small (~285MB) footprint, so it doesn't need a full PyTorch/CUDA-oriented stack just to run | ✅ **~14s/sentence, reliable, and light enough to run alongside the rest of the app (Resemblyzer, AASIST-L, Postgres, Redis) on the same machine** |
+
+The deciding factor across all three wasn't voice quality — it was whether the model could run reliably on CPU-only hardware without starving everything else on the box. VieNeu-TTS was the first one that did.
 
 ---
 
