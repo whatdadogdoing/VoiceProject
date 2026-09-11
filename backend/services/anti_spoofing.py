@@ -3,31 +3,25 @@ import os
 import wave
 
 import numpy as np
-import torch
+import onnxruntime as ort
 
-from services.aasist_model import Model as AASISTModel
-
-_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights", "aasist_l.pth")
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), "weights", "aasist_l.onnx")
 _NB_SAMP = 64600  # fixed input length the pretrained weights were trained on (~4.04s @ 16kHz)
 
-_MODEL_CONFIG = {
-    "first_conv": 128,
-    "filts": [70, [1, 32], [32, 32], [32, 24], [24, 24]],
-    "gat_dims": [24, 32],
-    "pool_ratios": [0.4, 0.5, 0.7, 0.5],
-    "temperatures": [2.0, 2.0, 100.0, 100.0],
-}
-
-_model: AASISTModel | None = None
+_session: ort.InferenceSession | None = None
 
 
 def load_model() -> None:
-    global _model
-    if _model is None:
-        model = AASISTModel(_MODEL_CONFIG)
-        model.load_state_dict(torch.load(_WEIGHTS_PATH, map_location="cpu"))
-        model.eval()
-        _model = model
+    global _session
+    if _session is None:
+        options = ort.SessionOptions()
+        # Capped rather than left to auto-detect all cores: analyze() runs
+        # concurrently with speaker_verification.embed() (see voice_auth.py's
+        # asyncio.gather), and letting both claim every core on a 2-core
+        # laptop causes the same kind of thread-pool contention already
+        # worked around for numba/torch in speaker_verification.py.
+        options.intra_op_num_threads = 2
+        _session = ort.InferenceSession(_MODEL_PATH, sess_options=options, providers=["CPUExecutionProvider"])
 
 
 def _pad(x: np.ndarray, max_len: int = _NB_SAMP) -> np.ndarray:
@@ -47,12 +41,11 @@ def _wav_to_float32(wav_bytes: bytes) -> np.ndarray:
 def analyze(wav_bytes: bytes) -> float:
     load_model()
 
-    x = _pad(_wav_to_float32(wav_bytes))
-    x_tensor = torch.from_numpy(x).unsqueeze(0)
+    x = _pad(_wav_to_float32(wav_bytes))[np.newaxis, :]  # (1, NB_SAMP)
+    logits = _session.run(["logits"], {"waveform": x})[0]
 
-    with torch.no_grad():
-        _, logits = _model(x_tensor)
-        # trained with label 0=spoof, 1=bonafide (AASIST/ASVspoof2019 convention)
-        probs = torch.softmax(logits, dim=1)
+    # trained with label 0=spoof, 1=bonafide (AASIST/ASVspoof2019 convention)
+    exp = np.exp(logits - np.max(logits, axis=1, keepdims=True))
+    probs = exp / np.sum(exp, axis=1, keepdims=True)
 
-    return probs[0, 0].item()
+    return float(probs[0, 0])

@@ -2,7 +2,10 @@
 AASIST
 Copyright (c) 2021-present NAVER Corp.
 MIT license
-Vendored from https://github.com/clovaai/aasist (models/AASIST.py) for anti-spoofing inference.
+Vendored from https://github.com/clovaai/aasist (models/AASIST.py). Only used
+offline by scripts/export_aasist_onnx.py to rebuild weights/aasist_l.onnx --
+runtime inference (services/anti_spoofing.py) loads the ONNX export directly
+and does not import this module.
 """
 
 import random

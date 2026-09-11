@@ -10,6 +10,7 @@ __pycache__/
 fake-voice-lab/data/
 security-tests/reference/
 security-tests/output/
+backend/services/weights/vosk-model-small-vn-0.4/
 
 # editor / OS
 .vscode/

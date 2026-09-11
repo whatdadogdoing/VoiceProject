@@ -15,14 +15,19 @@ async def record_consent(user_id: str, ip: str, user_agent: str) -> None:
 async def revoke_consent(user_id: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE consent_records SET is_active=FALSE
-            WHERE user_id=$1 AND is_active=TRUE
-        """, user_id)
-        await conn.execute("""
-            UPDATE voiceprints SET is_active=FALSE
-            WHERE user_id=$1
-        """, user_id)
+        async with conn.transaction():
+            await conn.execute("""
+                UPDATE consent_records SET is_active=FALSE
+                WHERE user_id=$1 AND is_active=TRUE
+            """, user_id)
+            # Revoking consent means the stored biometric template is no
+            # longer authorized to exist at all -- merely flipping is_active
+            # (like the blue-green re-enrollment swap does) would leave the
+            # embedding sitting in the table indefinitely with no way back to
+            # active, which doesn't actually honor "delete my voice data".
+            await conn.execute("""
+                DELETE FROM voiceprints WHERE user_id=$1
+            """, user_id)
 
 
 async def has_active_consent(user_id: str) -> bool:

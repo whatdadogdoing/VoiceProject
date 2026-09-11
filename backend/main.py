@@ -10,6 +10,7 @@ from routers.enroll import router as enroll_router
 from services.rate_limiter import limiter
 from services.anti_spoofing import load_model as load_antispoofing_model
 from services.speaker_verification import load_encoder as load_speaker_encoder
+from services.stt import load_model as load_stt_model
 from models.db import get_pool
 
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     await get_pool()
     load_antispoofing_model()
     load_speaker_encoder()
+    load_stt_model()
     yield
 
 
@@ -28,7 +30,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")],
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Device-Id"],
 )
 
 app.include_router(auth_router)

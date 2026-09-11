@@ -1,8 +1,9 @@
 import asyncio
 import json
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from services.speaker_verification import embed, average_embedding, ENROLL_SAMPLES_REQUIRED
 from services.phrases import random_phrases, another_phrase, matches_phrase
+from services.stt import transcribe
 from services.audio import to_wav_pcm16
 from services.consent import has_active_consent
 from services.rate_limiter import limiter
@@ -53,8 +54,7 @@ async def reshuffle_phrase(request: Request, user_id: str = Depends(get_enroll_u
 async def submit_sample(
     request: Request,
     user_id: str = Depends(get_enroll_user_id),
-    audio: UploadFile = File(...),
-    transcript: str = Form("")
+    audio: UploadFile = File(...)
 ):
     if not await has_active_consent(user_id):
         raise HTTPException(403, "Bạn chưa đồng ý cho phép sử dụng dữ liệu giọng nói")
@@ -67,18 +67,23 @@ async def submit_sample(
     sample_index = len(state["embeddings"])
     expected_phrase = state["phrases"][sample_index]
 
-    if not matches_phrase(expected_phrase, transcript):
+    audio_bytes = await audio.read()
+    if len(audio_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Audio quá lớn")
+
+    try:
+        wav_bytes = await asyncio.to_thread(to_wav_pcm16, audio_bytes)
+    except Exception:
+        raise HTTPException(400, "Không đọc được file âm thanh, hãy thử ghi âm lại")
+
+    server_transcript = await asyncio.to_thread(transcribe, wav_bytes)
+    if not matches_phrase(expected_phrase, server_transcript):
         return {
             "status": "phrase_mismatch",
             "message": "Câu đọc không khớp với câu được yêu cầu, hãy thử lại",
             "phrase": expected_phrase
         }
 
-    audio_bytes = await audio.read()
-    if len(audio_bytes) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Audio quá lớn")
-
-    wav_bytes = await asyncio.to_thread(to_wav_pcm16, audio_bytes)
     sample_embedding = await asyncio.to_thread(embed, wav_bytes)
     state["embeddings"].append(sample_embedding)
 

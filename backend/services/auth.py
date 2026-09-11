@@ -8,6 +8,15 @@ from models.db import has_voiceprint
 
 SESSION_TTL_SECONDS = 1800
 
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
+# Used in place of a real hash when the email doesn't exist, so verify_password
+# still runs its full bcrypt comparison either way -- otherwise a login for an
+# unknown email returns near-instantly while a wrong password pays the bcrypt
+# cost, and that timing gap is enough to enumerate registered emails.
+DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"no-such-account", bcrypt.gensalt()).decode()
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -17,10 +26,35 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
+def _login_attempts_key(email: str) -> str:
+    return f"login_attempts:{email.strip().lower()}"
+
+
+async def is_login_locked(email: str) -> bool:
+    attempts = await get_redis().get(_login_attempts_key(email))
+    return int(attempts or 0) >= LOGIN_MAX_ATTEMPTS
+
+
+async def record_login_failure(email: str) -> None:
+    key = _login_attempts_key(email)
+    redis_client = get_redis()
+    attempts = await redis_client.incr(key)
+    if attempts == 1:
+        await redis_client.expire(key, LOGIN_LOCKOUT_SECONDS)
+
+
+async def clear_login_failures(email: str) -> None:
+    await get_redis().delete(_login_attempts_key(email))
+
+
 async def create_session(user_id: str) -> str:
     token = secrets.token_urlsafe(32)
     await get_redis().setex(f"session:{token}", SESSION_TTL_SECONDS, user_id)
     return token
+
+
+async def invalidate_session(token: str) -> None:
+    await get_redis().delete(f"session:{token}")
 
 
 async def get_current_user_id(request: Request) -> str:

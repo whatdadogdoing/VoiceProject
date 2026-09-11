@@ -1,9 +1,11 @@
 import asyncio
 import json
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
+from pydantic import BaseModel
 from services.speaker_verification import embed, cosine_similarity, adapt_embedding
 from services.anti_spoofing import analyze
+from services.stt import transcribe
 from services.audio import to_wav_pcm16, is_too_quiet
 from services.risk_engine import evaluate, fraud_lock_key
 from services.otp import send_otp, verify_otp
@@ -23,6 +25,10 @@ router = APIRouter(prefix="/api/voice-auth")
 
 VOICE_PASSED_TTL_SECONDS = 300
 VERIFY_PHRASE_TTL_SECONDS = 120
+
+
+class OtpVerifyRequest(BaseModel):
+    code: str
 
 
 @router.get("/status")
@@ -64,8 +70,7 @@ async def verify_prompt(request: Request, user_id: str = Depends(get_current_use
 async def verify(
     request: Request,
     user_id: str = Depends(get_current_user_id),
-    audio: UploadFile = File(...),
-    transcript: str = Form("")
+    audio: UploadFile = File(...)
 ):
     if not await has_active_consent(user_id):
         raise HTTPException(403, "Bạn chưa đồng ý cho phép sử dụng dữ liệu giọng nói")
@@ -85,9 +90,16 @@ async def verify(
         raise HTTPException(404, "User chưa đăng ký voiceprint")
 
     client_ip = get_client_ip(request)
-    device_fp = request.headers.get("User-Agent", "")
+    # X-Device-Id is a random id the frontend generates once and persists in
+    # localStorage (see app.js authHeaders()) -- far higher entropy than the
+    # User-Agent string, which is identical for every visitor on the same
+    # browser/OS build and so barely distinguishes "new device" at all.
+    device_fp = request.headers.get("X-Device-Id") or request.headers.get("User-Agent", "")
 
-    wav_bytes = await asyncio.to_thread(to_wav_pcm16, audio_bytes)
+    try:
+        wav_bytes = await asyncio.to_thread(to_wav_pcm16, audio_bytes)
+    except Exception:
+        raise HTTPException(400, "Không đọc được file âm thanh, hãy thử ghi âm lại")
 
     # Quality gate before the phrase check: garbled speech-to-text on a too-quiet
     # recording would otherwise surface as a confusing "wrong phrase" rejection.
@@ -98,7 +110,8 @@ async def verify(
         )
         return {"decision": "rejected", "reason": "audio_too_quiet"}
 
-    if not matches_phrase(expected_phrase, transcript):
+    server_transcript = await asyncio.to_thread(transcribe, wav_bytes)
+    if not matches_phrase(expected_phrase, server_transcript):
         await log_attempt(
             user_id, None, None, "rejected", "phrase_mismatch",
             ip=client_ip, device=device_fp
@@ -151,11 +164,11 @@ async def send_otp_endpoint(request: Request, user_id: str = Depends(get_current
 
 @router.post("/otp/verify")
 @limiter.limit("5/minute")
-async def verify_otp_endpoint(request: Request, code: str, user_id: str = Depends(get_current_user_id)):
+async def verify_otp_endpoint(request: Request, body: OtpVerifyRequest, user_id: str = Depends(get_current_user_id)):
     if not await get_redis().exists(f"voice_passed:{user_id}"):
         raise HTTPException(403, "Phiên xác thực giọng nói đã hết hạn, vui lòng xác thực lại")
 
-    ok = await verify_otp(user_id, code)
+    ok = await verify_otp(user_id, body.code)
     if not ok:
         raise HTTPException(401, "OTP không hợp lệ hoặc đã hết hạn")
 
@@ -189,8 +202,8 @@ async def send_recovery_otp(request: Request, user_id: str = Depends(get_current
 
 @router.post("/recovery/otp/verify")
 @limiter.limit("5/minute")
-async def verify_recovery_otp(request: Request, code: str, user_id: str = Depends(get_current_user_id)):
-    ok = await verify_otp(user_id, code)
+async def verify_recovery_otp(request: Request, body: OtpVerifyRequest, user_id: str = Depends(get_current_user_id)):
+    ok = await verify_otp(user_id, body.code)
     if not ok:
         raise HTTPException(401, "OTP không hợp lệ hoặc đã hết hạn")
 

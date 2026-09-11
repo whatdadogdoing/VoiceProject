@@ -15,12 +15,14 @@ A voice-based authentication system combining **speaker verification**, **deepfa
 | | |
 |---|---|
 | 🗣️ **Speaker verification** | [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) embeddings, cosine similarity vs. a stored voiceprint |
-| 🕵️ **Anti-spoofing** | [AASIST-L](https://github.com/clovaai/aasist), a graph-attention deepfake detector pretrained on ASVspoof2019 |
+| 🕵️ **Anti-spoofing** | [AASIST-L](https://github.com/clovaai/aasist), a graph-attention deepfake detector pretrained on ASVspoof2019, running on ONNX Runtime (~2.6x faster than raw PyTorch on CPU) |
+| 🎙️ **Server-side phrase verification** | [Vosk](https://alphacephei.com/vosk/) offline Vietnamese speech-to-text checks what was actually said in the audio — the client's own transcript is never trusted for this |
 | 📧 **Email OTP 2FA** | 6-digit code, auto-advancing input boxes, auto-submits — no confirm button |
 | 🔁 **Random challenge phrases** | never repeats a user's last 10 phrases → resists replay attacks |
 | 🔒 **Persistent fraud lockout** | 3 spoof detections in 30 min locks voice auth *indefinitely* — no waiting it out |
 | 🆘 **Password + email recovery** | unlocks the account, or re-enrolls a voice that stopped cooperating |
 | 🔄 **Blue-green re-enrollment** | new voiceprint fully validated before the old one is ever removed |
+| 🛡️ **Hardened auth plumbing** | non-spoofable client IP, account-level login lockout, real session invalidation on logout, persisted per-browser device id |
 | 🧪 **Fake Voice Lab** | clone your own voice and attack your own `/verify` endpoint to test it |
 
 ---
@@ -96,8 +98,9 @@ flowchart LR
 | `backend/routers/voice_auth.py` | consent · verify · OTP · **recovery** (unlock + re-enroll fallback) |
 | `backend/routers/enroll.py` | enrollment & re-enrollment sample submission |
 | `backend/services/risk_engine.py` | score thresholds, rate limits, the persistent fraud lock |
-| `backend/services/anti_spoofing.py` | AASIST-L inference |
+| `backend/services/anti_spoofing.py` | AASIST-L inference (ONNX Runtime) |
 | `backend/services/speaker_verification.py` | Resemblyzer embeddings |
+| `backend/services/stt.py` | Vosk speech-to-text, server-side phrase verification |
 | `frontend/` | nginx + vanilla HTML/CSS/JS, reverse-proxies `/api/*` |
 | `fake-voice-lab/` | standalone voice-clone attack tool (own Dockerfile, own port) |
 | `security-tests/` | earlier CLI prototype, superseded by `fake-voice-lab` |
@@ -149,5 +152,8 @@ Getting a working Vietnamese voice clone on this hardware (2-core CPU, 12GB RAM,
 ## 📝 Notes
 
 - AASIST-L was trained on studio-quality ASVspoof2019 audio. Real browser-recorded audio — codec compression, echo-cancellation/noise-suppression/AGC — shifted its scores enough to cause false "spoofing detected" rejections on genuine speech; the recorder explicitly disables those browser DSP features to stay closer to what the model expects.
+- AASIST-L runs from a PyTorch→ONNX export (`backend/scripts/export_aasist_onnx.py`) instead of raw PyTorch — verified numerically identical (< 1e-8 max diff on random inputs) and ~2.6x faster per call (983ms → 378ms on 2 CPU threads), which matters on the resource-constrained hardware below.
+- The challenge phrase is checked against server-side Vosk STT output, not a client-supplied transcript — a client (browser or script) has no way to skip or fake this check.
 - Single-user personal/academic project — not hardened for multi-user production traffic.
 - Developed on a resource-constrained Windows/WSL2/Docker Desktop setup. Stability there needed explicit `.wslconfig` memory/CPU/swap limits and `init: true` on the heavier container (to reap zombie processes from ML library threads) — both host-specific, so `.wslconfig` isn't committed here.
+- `backend/tests/` has a pytest suite for the security-critical logic (risk engine decisions, phrase matching, JWT auth-method checks, IP header handling, login lockout) that doesn't need Postgres/Redis running — `pip install -r requirements-dev.txt && pytest` from `backend/`.

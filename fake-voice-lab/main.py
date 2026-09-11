@@ -144,7 +144,6 @@ async def attack_send():
         f"{AUTH_BACKEND_URL}/api/voice-auth/verify",
         headers=headers,
         files={"audio": ("fake.wav", wav_bytes, "audio/wav")},
-        data={"transcript": phrase},
     )
     if not verify_res.ok:
         raise HTTPException(verify_res.status_code, verify_res.json().get("detail", "Gửi thất bại"))

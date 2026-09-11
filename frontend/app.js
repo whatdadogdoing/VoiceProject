@@ -25,8 +25,20 @@ function showStep(id) {
     qs(id).classList.add('active');
 }
 
+// Persisted once per browser so the backend's risk engine can tell "new
+// device" apart from "same browser as always" -- the User-Agent string alone
+// is identical for every visitor on the same browser/OS build.
+function getDeviceId() {
+    let id = localStorage.getItem('device_id');
+    if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem('device_id', id);
+    }
+    return id;
+}
+
 function authHeaders() {
-    return { Authorization: `Bearer ${sessionToken}` };
+    return { Authorization: `Bearer ${sessionToken}`, 'X-Device-Id': getDeviceId() };
 }
 
 function normalizeWord(w) {
@@ -240,9 +252,12 @@ qs('btn-enroll-confirm').onclick = async () => {
     confirmBtn.firstChild.className = 'spinner';
     confirmBtn.appendChild(document.createTextNode('Đang xử lý...'));
 
+    // enrollTranscript (from the browser's own Web Speech API, when available)
+    // is only used locally to highlight heard words live -- the server no
+    // longer trusts a client-supplied transcript, it runs its own
+    // speech-to-text on the uploaded audio to check the phrase was read.
     const formData = new FormData();
     formData.append('audio', enrollBlob, 'sample.webm');
-    formData.append('transcript', enrollTranscript);
     const res = await fetch('/api/voice-auth/enroll/sample', { method: 'POST', headers: authHeaders(), body: formData });
     const data = await res.json();
     confirmBtn.disabled = false;
@@ -375,9 +390,11 @@ qs('btn-verify-confirm').onclick = async () => {
     confirmBtn.firstChild.className = 'spinner';
     confirmBtn.appendChild(document.createTextNode('Đang xác thực...'));
 
+    // verifyTranscript is only used locally to highlight heard words live --
+    // the server runs its own speech-to-text on the uploaded audio instead
+    // of trusting a client-supplied transcript.
     const formData = new FormData();
     formData.append('audio', verifyBlob, 'voice.webm');
-    formData.append('transcript', verifyTranscript);
     const res = await fetch('/api/voice-auth/verify', { method: 'POST', headers: authHeaders(), body: formData });
     const data = await res.json();
     confirmBtn.disabled = false;
@@ -496,9 +513,10 @@ async function submitOtp() {
     otpSubmitting = true;
 
     const endpoint = otpMode === 'recovery' ? '/api/voice-auth/recovery/otp/verify' : '/api/voice-auth/otp/verify';
-    const res = await fetch(`${endpoint}?code=${encodeURIComponent(code)}`, {
+    const res = await fetch(endpoint, {
         method: 'POST',
-        headers: authHeaders()
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
     });
     otpSubmitting = false;
 
@@ -597,7 +615,12 @@ qs('btn-reenroll').onclick = async () => {
 
 // ---------- Logout ----------
 
-qs('btn-logout-header').onclick = () => {
+qs('btn-logout-header').onclick = async () => {
+    // best-effort: invalidate the server-side session so a copied/leaked
+    // token can't keep being used after the user has explicitly logged out
+    if (sessionToken) {
+        fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
     localStorage.removeItem('access_token');
     sessionToken = null;
     isReenrolling = false;

@@ -147,8 +147,9 @@ def _normalize_words(text: str) -> list[str]:
 
 
 def matches_phrase(expected: str, transcript: str) -> bool:
-    if not transcript:
-        return True  # trình duyệt không hỗ trợ Web Speech API (vd. Firefox) -> bỏ qua kiểm tra nội dung
+    """`transcript` must come from server-side STT (services/stt.transcribe)
+    run on the actual submitted audio -- never from a client-supplied field,
+    which a caller could simply leave empty to skip this check entirely."""
     expected_words = _normalize_words(expected)
     transcript_words = set(_normalize_words(transcript))
     if not expected_words:
