@@ -120,7 +120,7 @@ docker compose up -d
 
 ## 🧪 Fake Voice Lab
 
-*If someone got a short recording of my voice, could they clone it and beat my own anti-spoofing model?*
+*The premise: if an attacker obtained a short recording of a user's voice, could a commodity zero-shot voice-cloning model clone it convincingly enough to beat this app's own defenses?*
 
 ```mermaid
 flowchart LR
@@ -135,7 +135,9 @@ flowchart LR
     I --> J["📊 See if AASIST-L<br/>caught it"]
 ```
 
-Run with `docker compose up -d` from inside `fake-voice-lab/` — it joins the main app's Docker network to reach the real backend directly. **Only ever point this at an account you own.**
+The attack test exercises the full defense stack, not just the spoof detector in isolation: a submitted clone still has to pass speaker verification (does the embedding match the enrolled voiceprint?), server-side phrase verification (does the Vosk transcript of the clone actually match the live challenge phrase?), and AASIST-L's spoof score — the same three checks a real forged attempt against `/verify` would have to clear.
+
+Run with `docker compose up -d` from inside `fake-voice-lab/` — it joins the main app's Docker network to reach the real backend directly, the same way an outside attacker's script would talk to it over HTTP. **Only ever point this at an account you own.**
 
 ### Why VieNeu-TTS?
 
