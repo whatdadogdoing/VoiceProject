@@ -116,6 +116,13 @@ docker compose up -d
 
 → **`http://localhost:3000`**. The backend is never exposed directly — everything routes through nginx.
 
+**First run takes a while — that's expected, not broken:**
+- Building the backend image installs the full ML/audio dependency stack (torch, onnxruntime, librosa, scikit-learn, resemblyzer, vosk, ...) from scratch — several minutes depending on your connection.
+- The backend then needs several more minutes on top of that to actually become ready: it loads AASIST-L (ONNX), the Resemblyzer speaker encoder, and the Vosk speech-to-text model (downloaded once, cached under `backend/services/weights/`) before it can serve a single request. `docker compose ps` shows it as `health: starting` during this window.
+- The frontend deliberately won't start until the backend reports healthy, so `http://localhost:3000` may be unreachable for a few minutes after `up` rather than serving a broken page — see `docker-compose.yml`'s `healthcheck`/`depends_on: condition: service_healthy`.
+
+**If a build looks stuck, don't force-kill Docker processes** (`taskkill` / `Stop-Process -Force` on `com.docker.build.exe`, `docker-compose.exe`, etc.) — killing the wrong internal process mid-build can corrupt Docker Desktop's WSL2 data disk and wipe every image, container, and volume on the machine. If something genuinely hangs, run `docker desktop restart` instead: it's the official, graceful way to reset Docker Desktop's engine without touching the underlying VM disk.
+
 ---
 
 ## 🧪 Fake Voice Lab
@@ -161,3 +168,8 @@ The deciding factor across all three wasn't voice quality — it was whether the
 - Single-user personal/academic project — not hardened for multi-user production traffic.
 - Developed on a resource-constrained Windows/WSL2/Docker Desktop setup. Stability there needed explicit `.wslconfig` memory/CPU/swap limits and `init: true` on the heavier container (to reap zombie processes from ML library threads) — both host-specific, so `.wslconfig` isn't committed here.
 - `backend/tests/` has a pytest suite for the security-critical logic (risk engine decisions, phrase matching, JWT auth-method checks, IP header handling, login lockout) that doesn't need Postgres/Redis running — `pip install -r requirements-dev.txt && pytest` from `backend/`.
+- Hardening pass on request/response and container handling, found and verified by actually running the stack rather than just reading the code:
+  - `frontend/nginx.conf` raises `client_max_body_size` to 6m. nginx's own default (1m) was stricter than the backend's 5MB audio-size check, so a legitimate recording between 1-5MB got a raw HTML 413 from nginx before ever reaching the backend's JSON error handling.
+  - The backend now has a real Docker healthcheck (`docker-compose.yml`, probing `/docs`), and the frontend's startup is gated on it passing. The ASGI app can't accept any connection at all until model loading finishes in its `lifespan` startup hook, so previously nginx started immediately and served instant 502s for the entire multi-minute cold start.
+  - `backend/Dockerfile` explicitly preinstalls a CPU-only torch wheel before `pip install -r requirements.txt`. resemblyzer depends on torch internally as a real runtime dependency (not just the AASIST-L export tooling) — without the preinstall, pip resolves it on its own and pulls the much larger default CUDA build instead.
+  - Both pip install steps use BuildKit cache mounts rather than `--no-cache-dir`, so a build interrupted partway through (a stalled download on a slow connection) doesn't have to re-fetch every already-downloaded package on the next attempt.
