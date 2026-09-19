@@ -1,3 +1,12 @@
 -r requirements.txt
 pytest==9.1.1
 pytest-asyncio==1.4.0
+
+# torch is already installed as a real runtime dependency (resemblyzer needs
+# it internally -- see backend/Dockerfile) and pulled in transitively via
+# -r requirements.txt above, so it doesn't need to be listed here again.
+#
+# onnx (distinct from onnxruntime, which IS a runtime dependency) is only
+# needed to run scripts/export_aasist_onnx.py -- re-exporting AASIST-L to
+# ONNX if the .pth weights ever change. Install it separately:
+#   pip install onnx

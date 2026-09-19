@@ -11,6 +11,20 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+    healthcheck:
+      # The ASGI app can't accept any TCP connection at all until model
+      # loading (AASIST-L, Resemblyzer, Vosk) finishes inside the lifespan
+      # startup hook -- confirmed live that a request during that window gets
+      # an instant connection-refused, not a slow response. That makes /docs
+      # a reliable readiness probe: it only succeeds once startup is truly
+      # done. start_period is generous because cold start on this bind-mounted
+      # dev setup has been observed to take several minutes (Windows/WSL2
+      # bind-mount I/O for the Vosk model's many small files).
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
 
   postgres:
     image: postgres:16-alpine
@@ -42,7 +56,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     volumes:
       - ./frontend:/usr/share/nginx/html
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
