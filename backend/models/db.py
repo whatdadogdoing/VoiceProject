@@ -139,15 +139,20 @@ async def log_attempt(user_id, voiceprint_score, spoof_score, decision, reason, 
         """, user_id, voiceprint_score, spoof_score, decision, reason, ip, device)
 
 
-async def count_recent_failures(user_id: str, minutes: int = 10) -> int:
+async def count_recent_failures(user_id: str, minutes: int = 10, exclude_reasons=()) -> int:
+    """Rejected attempts in the window. `exclude_reasons` lets the caller leave
+    out failure reasons that say nothing about security (a bad mic, a misread
+    phrase); COALESCE keeps a NULL reason from silently dropping the row, since
+    `NULL <> ALL(...)` is NULL rather than true."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT COUNT(*) as cnt FROM voice_auth_attempts
             WHERE user_id=$1
             AND risk_decision='rejected'
+            AND COALESCE(failure_reason, '') <> ALL($3::text[])
             AND attempted_at > NOW() - ($2 || ' minutes')::INTERVAL
-        """, user_id, str(minutes))
+        """, user_id, str(minutes), list(exclude_reasons))
         return row["cnt"]
 
 

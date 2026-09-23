@@ -4,7 +4,10 @@ BASE_CONTEXT = {"hour_of_day": 12, "is_new_device": False, "is_new_ip": False}
 
 
 def _patch_counts(monkeypatch, failures=0, fraud=0):
-    async def fake_failures(user_id, minutes=10):
+    seen = {}
+
+    async def fake_failures(user_id, minutes=10, exclude_reasons=()):
+        seen["exclude_reasons"] = frozenset(exclude_reasons)
         return failures
 
     async def fake_fraud(user_id, minutes=30):
@@ -12,6 +15,7 @@ def _patch_counts(monkeypatch, failures=0, fraud=0):
 
     monkeypatch.setattr(risk_engine, "count_recent_failures", fake_failures)
     monkeypatch.setattr(risk_engine, "count_recent_fraud_failures", fake_fraud)
+    return seen
 
 
 def _patch_redis(monkeypatch, fake_redis):
@@ -55,6 +59,43 @@ async def test_third_spoof_detection_trips_persistent_lock(monkeypatch, fake_red
     decision, reason, meta = await risk_engine.evaluate("u1", 0.9, 0.9, BASE_CONTEXT)
     assert (decision, reason) == ("rejected", "fraud_lockout")
     assert await fake_redis.exists(risk_engine.fraud_lock_key("u1"))
+
+
+async def test_throttle_ignores_audio_quality_failures(monkeypatch, fake_redis):
+    # Regression test: a bad mic or a misread phrase used to count toward the
+    # 5-in-10-minutes security throttle, so five sloppy takes followed by a
+    # good one still came back rate_limit_exceeded.
+    seen = _patch_counts(monkeypatch)
+    _patch_redis(monkeypatch, fake_redis)
+    await risk_engine.evaluate("u1", 0.9, 0.1, BASE_CONTEXT)
+    assert seen["exclude_reasons"] == {"audio_too_quiet", "phrase_mismatch"}
+
+
+def test_security_relevant_reasons_are_not_excluded_from_the_throttle():
+    for reason in ("voiceprint_mismatch", "spoofing_detected", "suspicious_context", "fraud_lockout"):
+        assert reason not in risk_engine.QUALITY_FAILURE_REASONS
+
+
+def test_only_confident_matches_may_adapt_the_voiceprint():
+    assert risk_engine.should_adapt_voiceprint(risk_engine.ADAPT_MIN_SCORE)
+    assert risk_engine.should_adapt_voiceprint(0.95)
+    # a sample that merely cleared the 0.7 match bar must not move the template
+    assert not risk_engine.should_adapt_voiceprint(0.71)
+    assert not risk_engine.should_adapt_voiceprint(risk_engine.ADAPT_MIN_SCORE - 0.01)
+
+
+async def test_spoof_threshold_is_inclusive(monkeypatch, fake_redis):
+    _patch_counts(monkeypatch)
+    _patch_redis(monkeypatch, fake_redis)
+    decision, reason, _ = await risk_engine.evaluate("u1", 0.9, risk_engine.SPOOF_THRESHOLD, BASE_CONTEXT)
+    assert (decision, reason) == ("rejected", "spoofing_detected")
+
+
+async def test_just_below_spoof_threshold_passes(monkeypatch, fake_redis):
+    _patch_counts(monkeypatch)
+    _patch_redis(monkeypatch, fake_redis)
+    decision, reason, _ = await risk_engine.evaluate("u1", 0.9, risk_engine.SPOOF_THRESHOLD - 0.01, BASE_CONTEXT)
+    assert (decision, reason) == ("mfa_required", None)
 
 
 async def test_voiceprint_mismatch(monkeypatch, fake_redis):

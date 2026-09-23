@@ -1,13 +1,12 @@
 import asyncio
 import json
-from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
 from services.speaker_verification import embed, cosine_similarity, adapt_embedding
 from services.anti_spoofing import analyze
 from services.stt import transcribe
 from services.audio import to_wav_pcm16, is_too_quiet
-from services.risk_engine import evaluate, fraud_lock_key
+from services.risk_engine import evaluate, fraud_lock_key, should_adapt_voiceprint
 from services.otp import send_otp, verify_otp
 from services.token import create_access_token
 from services.consent import has_active_consent, record_consent, revoke_consent
@@ -19,7 +18,7 @@ from models.db import (
     get_user_embedding, get_user_email, has_voiceprint, log_attempt,
     is_known_device, is_known_ip, update_voiceprint_embedding
 )
-from utils import get_client_ip
+from utils import get_client_ip, get_device_fingerprint, local_hour
 
 router = APIRouter(prefix="/api/voice-auth")
 
@@ -90,11 +89,7 @@ async def verify(
         raise HTTPException(404, "User chưa đăng ký voiceprint")
 
     client_ip = get_client_ip(request)
-    # X-Device-Id is a random id the frontend generates once and persists in
-    # localStorage (see app.js authHeaders()) -- far higher entropy than the
-    # User-Agent string, which is identical for every visitor on the same
-    # browser/OS build and so barely distinguishes "new device" at all.
-    device_fp = request.headers.get("X-Device-Id") or request.headers.get("User-Agent", "")
+    device_fp = get_device_fingerprint(request)
 
     try:
         wav_bytes = await asyncio.to_thread(to_wav_pcm16, audio_bytes)
@@ -125,7 +120,7 @@ async def verify(
     voiceprint_score = cosine_similarity(enrolled_embedding, sample_embedding)
 
     context = {
-        "hour_of_day": datetime.now().hour,
+        "hour_of_day": local_hour(),
         "is_new_device": not await is_known_device(user_id, device_fp),
         "is_new_ip": not await is_known_ip(user_id, client_ip)
     }
@@ -141,10 +136,15 @@ async def verify(
     if decision == "mfa_required":
         await get_redis().setex(f"voice_passed:{user_id}", VOICE_PASSED_TTL_SECONDS, "1")
         # held until OTP also succeeds, so the stored voiceprint only ever
-        # adapts toward a sample that cleared both auth factors
-        await get_redis().setex(
-            f"voice_sample_embedding:{user_id}", VOICE_PASSED_TTL_SECONDS, json.dumps(sample_embedding)
-        )
+        # adapts toward a sample that cleared both auth factors -- and only a
+        # confident match is kept at all: a borderline sample that scraped past
+        # the match threshold must not be able to pull the template toward
+        # itself (verify_otp_endpoint simply skips adaptation when nothing is
+        # cached here).
+        if should_adapt_voiceprint(voiceprint_score):
+            await get_redis().setex(
+                f"voice_sample_embedding:{user_id}", VOICE_PASSED_TTL_SECONDS, json.dumps(sample_embedding)
+            )
 
     return {"decision": decision, "reason": reason, **meta}
 

@@ -263,7 +263,10 @@ qs('btn-enroll-confirm').onclick = async () => {
     confirmBtn.disabled = false;
     confirmBtn.textContent = 'Xác nhận';
 
-    if (data.status === 'phrase_mismatch') {
+    // Both mean "this take wasn't accepted, record the same phrase again" --
+    // neither may fall through to the else branch below, which advances to the
+    // next phrase as if the sample had been stored.
+    if (data.status === 'phrase_mismatch' || data.status === 'spoof_detected') {
         qs('enroll-preview').style.display = 'none';
         qs('btn-record-sample').style.display = 'flex';
         setStatus(qs('status'), data.message, 'error');

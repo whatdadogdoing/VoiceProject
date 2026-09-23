@@ -18,3 +18,6 @@ backend/services/weights/vosk-model-small-vn-0.4/
 .DS_Store
 Thumbs.db
 .claude/
+
+# generated documentation containing personal info (student name/ID, advisor) -- not for the public repo
+docs/

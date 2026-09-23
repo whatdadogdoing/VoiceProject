@@ -1,0 +1,172 @@
+"""Tests for routers/enroll.py's submit_sample: the anti-spoofing gate on
+enrollment samples, and the trusted device/IP seeded when enrollment completes.
+
+routers.enroll pulls in the ML stack (Vosk, Resemblyzer, ONNX Runtime) and
+ffmpeg-backed audio decoding at import time, none of which a unit test should
+need. Those modules are stubbed before the router is imported; Redis and
+Postgres are faked. The real submit_sample logic and the real matches_phrase
+run unmodified.
+"""
+import importlib
+import json
+import sys
+import types
+
+import pytest
+from starlette.requests import Request
+
+from services import risk_engine
+
+PHRASES = [
+    "Hôm nay trời nắng đẹp và gió mát.",
+    "Tôi thích uống cà phê vào buổi sáng.",
+    "Chiếc xe màu đỏ đang đậu trước cổng.",
+]
+
+
+class _FakeUpload:
+    async def read(self):
+        return b"fake-audio-bytes"
+
+
+class _PassthroughLimiter:
+    def limit(self, *_args, **_kwargs):
+        return lambda fn: fn
+
+
+def _request(headers=None):
+    raw = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    return Request({"type": "http", "headers": raw, "client": ("172.21.0.1", 1234)})
+
+
+@pytest.fixture
+def enroll(monkeypatch, fake_redis):
+    stubs = {
+        "services.stt": types.SimpleNamespace(transcribe=lambda wav: ""),
+        "services.speaker_verification": types.SimpleNamespace(
+            embed=lambda wav: [0.1, 0.2],
+            average_embedding=lambda embeddings: embeddings[0],
+            ENROLL_SAMPLES_REQUIRED=3,
+        ),
+        "services.anti_spoofing": types.SimpleNamespace(analyze=lambda wav: 0.0),
+        "services.audio": types.SimpleNamespace(to_wav_pcm16=lambda b: b),
+        "services.rate_limiter": types.SimpleNamespace(limiter=_PassthroughLimiter()),
+    }
+    for name, stub in stubs.items():
+        monkeypatch.setitem(sys.modules, name, stub)
+    monkeypatch.delitem(sys.modules, "routers.enroll", raising=False)
+    module = importlib.import_module("routers.enroll")
+
+    calls = types.SimpleNamespace(saved=[], logged=[])
+
+    async def has_consent(user_id):
+        return True
+
+    async def has_voiceprint(user_id):
+        return False
+
+    async def save_voiceprint(user_id, embedding, replace_existing=False):
+        calls.saved.append((user_id, embedding, replace_existing))
+
+    async def log_attempt(user_id, voiceprint_score, spoof_score, decision, reason, ip=None, device=None):
+        calls.logged.append({
+            "user_id": user_id, "voiceprint_score": voiceprint_score, "spoof_score": spoof_score,
+            "decision": decision, "reason": reason, "ip": ip, "device": device,
+        })
+
+    monkeypatch.setattr(module, "has_active_consent", has_consent)
+    monkeypatch.setattr(module, "has_voiceprint", has_voiceprint)
+    monkeypatch.setattr(module, "save_voiceprint", save_voiceprint)
+    monkeypatch.setattr(module, "log_attempt", log_attempt)
+    monkeypatch.setattr(module, "get_redis", lambda: fake_redis)
+    # returns every assigned phrase, so matches_phrase passes for whichever
+    # sample index the test is on
+    monkeypatch.setattr(module, "transcribe", lambda wav: " ".join(PHRASES))
+
+    yield module, calls
+
+    sys.modules.pop("routers.enroll", None)
+
+
+async def _seed_state(fake_redis, embeddings):
+    await fake_redis.set("enroll:u1", json.dumps({"embeddings": embeddings, "phrases": PHRASES}))
+
+
+async def _state(fake_redis):
+    return json.loads(await fake_redis.get("enroll:u1"))
+
+
+async def test_spoofed_sample_is_rejected_and_state_unchanged(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.9)
+    await _seed_state(fake_redis, [])
+
+    result = await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert result["status"] == "spoof_detected"
+    assert result["phrase"] == PHRASES[0]
+    # the score itself must never reach the client, or it becomes a tuning oracle
+    assert set(result) == {"status", "message", "phrase"}
+    assert (await _state(fake_redis))["embeddings"] == []
+    assert calls.saved == []
+    # not logged as an attempt: that would feed the fraud-lockout counter
+    assert calls.logged == []
+
+
+async def test_sample_exactly_at_threshold_is_rejected(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: risk_engine.SPOOF_THRESHOLD)
+    await _seed_state(fake_redis, [])
+
+    result = await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert result["status"] == "spoof_detected"
+
+
+async def test_clean_sample_is_stored(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.1)
+    await _seed_state(fake_redis, [])
+
+    result = await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert result["status"] == "enrolling"
+    assert result["samples_submitted"] == 1
+    assert len((await _state(fake_redis))["embeddings"]) == 1
+    assert calls.logged == []
+
+
+async def test_spoofed_final_sample_cannot_complete_enrollment(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.9)
+    await _seed_state(fake_redis, [[0.1, 0.2], [0.1, 0.2]])
+
+    result = await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert result["status"] == "spoof_detected"
+    assert calls.saved == []
+    assert calls.logged == []
+    assert len((await _state(fake_redis))["embeddings"]) == 2
+
+
+async def test_completing_enrollment_saves_voiceprint_and_seeds_trusted_device(enroll, monkeypatch, fake_redis):
+    # Regression test: a freshly enrolled user has no attempt history, so their
+    # first verify was always "new device AND new IP" and needed a 0.85 match
+    # instead of 0.7. Enrollment now records the device/IP it happened from.
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.1)
+    await _seed_state(fake_redis, [[0.1, 0.2], [0.1, 0.2]])
+
+    result = await module.submit_sample(
+        request=_request({"x-real-ip": "198.51.100.7", "x-device-id": "dev-abc"}),
+        user_id="u1",
+        audio=_FakeUpload(),
+    )
+
+    assert result["status"] == "enrolled"
+    assert len(calls.saved) == 1
+    assert calls.logged == [{
+        "user_id": "u1", "voiceprint_score": None, "spoof_score": None,
+        "decision": "enrolled", "reason": None, "ip": "198.51.100.7", "device": "dev-abc",
+    }]
+    assert await fake_redis.get("enroll:u1") is None

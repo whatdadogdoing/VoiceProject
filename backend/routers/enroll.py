@@ -1,15 +1,23 @@
 import asyncio
 import json
+import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from services.speaker_verification import embed, average_embedding, ENROLL_SAMPLES_REQUIRED
 from services.phrases import random_phrases, another_phrase, matches_phrase
 from services.stt import transcribe
+from services.anti_spoofing import analyze
+from services.risk_engine import SPOOF_THRESHOLD
 from services.audio import to_wav_pcm16
 from services.consent import has_active_consent
 from services.rate_limiter import limiter
 from services.auth import get_enroll_user_id
 from services.redis_client import get_redis
-from models.db import save_voiceprint, has_voiceprint
+from models.db import save_voiceprint, has_voiceprint, log_attempt
+from utils import get_client_ip, get_device_fingerprint
+
+# uvicorn configures this logger at INFO; the root/module loggers aren't, so an
+# unconfigured logging.getLogger(__name__) would silently drop these lines.
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/voice-auth/enroll")
 
@@ -84,7 +92,26 @@ async def submit_sample(
             "phrase": expected_phrase
         }
 
-    sample_embedding = await asyncio.to_thread(embed, wav_bytes)
+    # Same anti-spoofing model /verify uses. Without this, a synthetic or
+    # replayed recording could become the stored template itself.
+    sample_embedding, spoof_score = await asyncio.gather(
+        asyncio.to_thread(embed, wav_bytes),
+        asyncio.to_thread(analyze, wav_bytes)
+    )
+    if spoof_score >= SPOOF_THRESHOLD:
+        # Deliberately not written to voice_auth_attempts: a rejected row would
+        # feed the fraud-lockout counter and the "known device" logic, and an
+        # enrollment retry isn't an authentication attack. The score goes to
+        # the server log only (never to the client) so the threshold can be
+        # calibrated against real recordings.
+        logger.info("enrollment sample rejected as suspected spoof (user=%s, score=%.3f)", user_id, spoof_score)
+        return {
+            "status": "spoof_detected",
+            "message": "Giọng thu được có dấu hiệu là giọng tổng hợp hoặc bản ghi lại. "
+                       "Hãy đọc trực tiếp vào micro bằng giọng thật của bạn, ở nơi yên tĩnh, rồi thử lại",
+            "phrase": expected_phrase
+        }
+
     state["embeddings"].append(sample_embedding)
 
     if len(state["embeddings"]) >= ENROLL_SAMPLES_REQUIRED:
@@ -92,6 +119,16 @@ async def submit_sample(
         is_reenroll = await has_voiceprint(user_id)
         await save_voiceprint(user_id, voiceprint, replace_existing=is_reenroll)
         await get_redis().delete(f"enroll:{user_id}")
+        # Enrolling took a password session + consent from this very browser, so
+        # treat it as the first trusted device/IP. Otherwise a brand-new user has
+        # no history and their first verify is always "new device AND new IP",
+        # which raises the required match score from 0.7 to 0.85 exactly when a
+        # genuine user is least likely to clear it.
+        await log_attempt(
+            user_id, None, None, "enrolled", None,
+            ip=get_client_ip(request) or None,
+            device=get_device_fingerprint(request)
+        )
         return {"status": "enrolled", "message": "Đăng ký voiceprint thành công"}
 
     await get_redis().setex(f"enroll:{user_id}", 600, json.dumps(state))

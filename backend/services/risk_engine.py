@@ -12,6 +12,37 @@ MAX_FAILURES = 5
 MAX_FRAUD_ATTEMPTS = 3
 FRAUD_DETECTION_WINDOW_MINUTES = 30
 
+# Shared by /verify (via evaluate) and enrollment, so both gates agree on what
+# counts as a suspected synthetic/replayed voice.
+SPOOF_THRESHOLD = 0.5
+
+# Minimum speaker-match (cosine similarity) score, and the stricter bar used
+# when the surrounding context looks unusual. Named so the evaluation script
+# (scripts/evaluate_thresholds.py) measures exactly the values that are deployed.
+MATCH_THRESHOLD = 0.7
+STRICT_MATCH_THRESHOLD = 0.85
+
+# Rejections that are about recording quality, not about who is speaking: a
+# bad mic, a misread phrase. They stay in voice_auth_attempts as an audit trail
+# but must not count toward the 5-in-10-minutes security throttle, otherwise a
+# genuine user with a poor microphone is locked out by their own retries. This
+# is safe because these attempts are still capped per IP by the /verify rate
+# limit, each challenge phrase is single-use, and neither reason involves a
+# voiceprint score, so they leak nothing an attacker could tune against.
+QUALITY_FAILURE_REASONS = frozenset({"audio_too_quiet", "phrase_mismatch"})
+
+# A successful verify nudges the stored voiceprint toward the new sample so it
+# can follow natural voice change. Adapting from any sample that merely cleared
+# the 0.7 match bar would let a borderline impostor/clone drag the template
+# toward itself, making the next attempt easier -- so only confident matches
+# are allowed to move it. Sessions scoring 0.7-0.85 still pass; they just don't
+# update the template.
+ADAPT_MIN_SCORE = 0.85
+
+
+def should_adapt_voiceprint(voiceprint_score: float) -> bool:
+    return voiceprint_score >= ADAPT_MIN_SCORE
+
 
 def fraud_lock_key(user_id: str) -> str:
     return f"fraud_locked:{user_id}"
@@ -24,25 +55,27 @@ async def evaluate(
     context: dict
 ) -> tuple[str, str | None, dict]:
 
-    recent_failures = await count_recent_failures(user_id, minutes=10)
+    recent_failures = await count_recent_failures(
+        user_id, minutes=10, exclude_reasons=QUALITY_FAILURE_REASONS
+    )
     if recent_failures >= MAX_FAILURES:
         return "rejected", "rate_limit_exceeded", {}
 
     if await get_redis().exists(fraud_lock_key(user_id)):
         return "rejected", "fraud_lockout", {}
 
-    if spoof_score >= 0.5:
+    if spoof_score >= SPOOF_THRESHOLD:
         recent_fraud = await count_recent_fraud_failures(user_id, minutes=FRAUD_DETECTION_WINDOW_MINUTES)
         if recent_fraud + 1 >= MAX_FRAUD_ATTEMPTS:
             await get_redis().set(fraud_lock_key(user_id), "1")
             return "rejected", "fraud_lockout", {}
         return "rejected", "spoofing_detected", {"tries_left": MAX_FRAUD_ATTEMPTS - recent_fraud - 1}
 
-    if voiceprint_score < 0.7:
+    if voiceprint_score < MATCH_THRESHOLD:
         return "rejected", "voiceprint_mismatch", {}
 
     if _is_suspicious_context(context):
-        if voiceprint_score < 0.85:
+        if voiceprint_score < STRICT_MATCH_THRESHOLD:
             return "rejected", "suspicious_context", {}
 
     return "mfa_required", None, {}
