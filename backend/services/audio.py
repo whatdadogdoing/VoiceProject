@@ -4,6 +4,10 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
+# RMS of the whole file, in dBFS: a take quieter than this is rejected as too
+# quiet to use. Not the scale of services/anti_spoofing.LEVEL_TARGET_DBFS (also
+# -40), which is the 90th percentile of 50 ms frame RMS and reads several dB
+# higher on the same take. The two are independent and only share a number.
 TOO_QUIET_DBFS = -40.0
 
 

@@ -43,9 +43,20 @@ def load_model() -> None:
 # Caveats: one speaker, small samples, clones were fed in directly rather than
 # replayed through a speaker, and the target was picked on the same data it was
 # checked on -- a starting point to re-verify, not a validated constant.
+#
+# Not the same quantity as services/audio.TOO_QUIET_DBFS, which is also -40: that
+# is the RMS of the whole file, this is the 90th percentile of 50 ms frame RMS,
+# which sits higher because pauses drag the whole-file RMS down (real browser
+# takes measured about -28 dBFS RMS but -23 dBFS on this scale). The two are
+# independent thresholds that happen to share a number.
 LEVEL_TARGET_DBFS = -40.0
 _LEVEL_FRAME = 800  # 50 ms at 16 kHz
-_MAX_GAIN_DB = 30.0  # never amplify near-silence into something that looks like speech
+# Only amplification is capped: boosting near-silence would invent something that
+# looks like speech. Attenuation creates no signal, so it is left uncapped -- a
+# take recorded very close to the mic (speech near -5 dBFS) needs about 35 dB of
+# cut, and clipping that at 30 dB would land it at -35 dBFS, inside the range
+# where genuine speech starts being flagged.
+_MAX_BOOST_DB = 30.0
 
 
 def _speech_level_dbfs(x: np.ndarray) -> float:
@@ -62,7 +73,7 @@ def _normalize_level(x: np.ndarray, target_dbfs: float = LEVEL_TARGET_DBFS) -> n
     level = _speech_level_dbfs(x)
     if not np.isfinite(level) or level < -80.0:
         return x  # silence or too short to measure; leave it alone
-    gain_db = float(np.clip(target_dbfs - level, -_MAX_GAIN_DB, _MAX_GAIN_DB))
+    gain_db = min(target_dbfs - level, _MAX_BOOST_DB)
     return np.clip(x * 10 ** (gain_db / 20), -1.0, 1.0).astype(np.float32)
 
 

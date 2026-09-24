@@ -13,6 +13,7 @@ import sys
 import types
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from services import risk_engine
@@ -135,6 +136,58 @@ async def test_a_clean_sample_is_not_captured(enroll, monkeypatch, fake_redis):
     await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
 
     assert captured == []
+
+
+async def _hit_the_spoof_limit(module, monkeypatch, fake_redis):
+    """Submit spoofed samples until the per-user enrollment limit is reached;
+    returns a list that records every call that actually reached the models."""
+    analyzed = []
+    monkeypatch.setattr(module, "analyze", lambda wav: analyzed.append(1) or 0.9)
+    await _seed_state(fake_redis, [])
+    for _ in range(module.ENROLL_SPOOF_LIMIT):
+        result = await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+        assert result["status"] == "spoof_detected"
+    return analyzed
+
+
+async def test_repeated_spoofed_samples_block_further_enrollment(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    analyzed = await _hit_the_spoof_limit(module, monkeypatch, fake_redis)
+
+    with pytest.raises(HTTPException) as blocked:
+        await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert blocked.value.status_code == 429
+    # the blocked call was refused before doing any model work
+    assert len(analyzed) == module.ENROLL_SPOOF_LIMIT
+
+
+async def test_the_enrollment_block_is_separate_from_the_verify_fraud_lock(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    await _hit_the_spoof_limit(module, monkeypatch, fake_redis)
+
+    assert await fake_redis.exists("fraud_locked:u1") == 0
+    assert calls.logged == []   # still not written to voice_auth_attempts
+
+
+async def test_clean_samples_are_not_counted(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    await _seed_state(fake_redis, [])
+
+    await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert await fake_redis.get("enroll_spoof:u1") is None
+
+
+async def test_the_enrollment_block_only_applies_to_the_user_who_earned_it(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    await _hit_the_spoof_limit(module, monkeypatch, fake_redis)
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.0)
+    await fake_redis.set("enroll:u2", json.dumps({"embeddings": [], "phrases": PHRASES}))
+
+    result = await module.submit_sample(request=_request(), user_id="u2", audio=_FakeUpload())
+
+    assert result["status"] == "enrolling"
 
 
 async def test_sample_exactly_at_threshold_is_rejected(enroll, monkeypatch, fake_redis):

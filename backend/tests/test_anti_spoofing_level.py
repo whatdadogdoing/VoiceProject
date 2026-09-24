@@ -63,8 +63,19 @@ def test_boost_is_capped_so_near_silence_is_not_turned_into_loud_noise():
     boosted = aa._speech_level_dbfs(aa._normalize_level(faint))
     original = aa._speech_level_dbfs(faint)
 
-    assert boosted - original == pytest.approx(aa._MAX_GAIN_DB, abs=0.5)
+    assert boosted - original == pytest.approx(aa._MAX_BOOST_DB, abs=0.5)
     assert boosted < aa.LEVEL_TARGET_DBFS - 5
+
+
+def test_a_very_loud_take_is_cut_all_the_way_to_the_target():
+    # Speech near -5 dBFS (recorded right at the mic) needs about 35 dB of cut. An
+    # earlier version clipped the gain at +/-30 dB and left such a take at about
+    # -35 dBFS, inside the range where genuine speech starts being flagged.
+    hot = _speechlike(amplitude=0.5)
+    level_in = aa._speech_level_dbfs(hot)
+    assert level_in - aa.LEVEL_TARGET_DBFS > aa._MAX_BOOST_DB   # needs more than 30 dB of cut
+
+    assert aa._speech_level_dbfs(aa._normalize_level(hot)) == pytest.approx(aa.LEVEL_TARGET_DBFS, abs=0.5)
 
 
 def test_normalized_audio_never_exceeds_full_scale():

@@ -20,6 +20,21 @@ from utils import get_client_ip, get_device_fingerprint
 # unconfigured logging.getLogger(__name__) would silently drop these lines.
 logger = logging.getLogger("uvicorn.error")
 
+# A sample rejected as a suspected spoof is deliberately NOT written to
+# voice_auth_attempts (see submit_sample), which left enrollment with no counter
+# beyond the 10/minute per-IP rate limit -- and the "spoof_detected" answer is a
+# pass/fail oracle someone could probe. So these are counted separately, per
+# user, and kept apart from /verify's fraud lock: enough rejections in an hour
+# block further samples until the window passes. Generous on purpose: with the
+# current level normalization genuine takes are rarely flagged.
+ENROLL_SPOOF_LIMIT = 10
+ENROLL_SPOOF_WINDOW_SECONDS = 3600
+
+
+def _spoof_counter_key(user_id: str) -> str:
+    return f"enroll_spoof:{user_id}"
+
+
 router = APIRouter(prefix="/api/voice-auth/enroll")
 
 
@@ -68,6 +83,11 @@ async def submit_sample(
     if not await has_active_consent(user_id):
         raise HTTPException(403, "Bạn chưa đồng ý cho phép sử dụng dữ liệu giọng nói")
 
+    strikes = await get_redis().get(_spoof_counter_key(user_id))
+    if strikes is not None and int(strikes) >= ENROLL_SPOOF_LIMIT:
+        logger.warning("enrollment blocked: too many suspected-spoof samples (user=%s)", user_id)
+        raise HTTPException(429, "Có quá nhiều mẫu bị nghi giả mạo trong giờ qua, hãy thử lại sau")
+
     raw = await get_redis().get(f"enroll:{user_id}")
     if not raw:
         raise HTTPException(400, "Phiên đăng ký không tồn tại hoặc đã hết hạn, hãy bắt đầu lại")
@@ -106,6 +126,10 @@ async def submit_sample(
         # calibrated against real recordings.
         logger.info("enrollment sample rejected as suspected spoof (user=%s, score=%.3f)", user_id, spoof_score)
         save_rejected(wav_bytes, "enroll-spoof", spoof_score)
+        # refreshed on every strike, so the block lasts an hour after the last one
+        # and the counter can never be left without an expiry
+        await get_redis().incr(_spoof_counter_key(user_id))
+        await get_redis().expire(_spoof_counter_key(user_id), ENROLL_SPOOF_WINDOW_SECONDS)
         return {
             "status": "spoof_detected",
             "message": "Giọng thu được có dấu hiệu là giọng tổng hợp hoặc bản ghi lại. "
