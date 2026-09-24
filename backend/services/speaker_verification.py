@@ -10,7 +10,13 @@ os.environ.setdefault("NUMBA_THREADING_LAYER", "workqueue")
 import numpy as np
 from resemblyzer import VoiceEncoder, preprocess_wav
 
-ENROLL_SAMPLES_REQUIRED = 3
+# The voiceprint is the average of this many samples. Each challenge phrase gives
+# only 2-4 s of speech, so a single embedding is noisy; simulating templates of
+# k in-app takes tested on the rest, the share of genuine takes falling under the
+# 0.70 bar was 45.5% (k=1), 16.1% (2), 7.8% (3), 3.9% (5), 2.1% (8). Five halves
+# the false rejections of three (the false acceptances rise a little at a fixed
+# threshold, but separation improves) for two more phrases at enrollment.
+ENROLL_SAMPLES_REQUIRED = 5
 
 _encoder: VoiceEncoder | None = None
 

@@ -105,13 +105,22 @@ async def test_voiceprint_mismatch(monkeypatch, fake_redis):
     assert (decision, reason) == ("rejected", "voiceprint_mismatch")
 
 
+# A score that clears the normal match bar but not the stricter one. Derived from
+# the constants so these tests keep meaning "between the two bars" if either moves.
+BETWEEN_THE_BARS = (risk_engine.MATCH_THRESHOLD + risk_engine.STRICT_MATCH_THRESHOLD) / 2
+
+
+def test_strict_bar_is_stricter_than_the_normal_bar():
+    assert risk_engine.STRICT_MATCH_THRESHOLD > risk_engine.MATCH_THRESHOLD
+
+
 async def test_suspicious_context_needs_higher_voiceprint_score(monkeypatch, fake_redis):
     _patch_counts(monkeypatch)
     _patch_redis(monkeypatch, fake_redis)
-    # new device AND new ip -> suspicious; 0.8 clears the normal 0.7 bar but
-    # not the stricter 0.85 one required under a suspicious context
+    # new device AND new ip -> suspicious; a score between the two bars clears the
+    # normal one but not the stricter one required under a suspicious context
     context = {"hour_of_day": 12, "is_new_device": True, "is_new_ip": True}
-    decision, reason, meta = await risk_engine.evaluate("u1", 0.8, 0.1, context)
+    decision, reason, meta = await risk_engine.evaluate("u1", BETWEEN_THE_BARS, 0.1, context)
     assert (decision, reason) == ("rejected", "suspicious_context")
 
 
@@ -127,5 +136,5 @@ async def test_late_night_new_device_alone_is_suspicious(monkeypatch, fake_redis
     _patch_counts(monkeypatch)
     _patch_redis(monkeypatch, fake_redis)
     context = {"hour_of_day": 3, "is_new_device": True, "is_new_ip": False}
-    decision, reason, meta = await risk_engine.evaluate("u1", 0.8, 0.1, context)
+    decision, reason, meta = await risk_engine.evaluate("u1", BETWEEN_THE_BARS, 0.1, context)
     assert (decision, reason) == ("rejected", "suspicious_context")

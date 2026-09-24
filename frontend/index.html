@@ -73,13 +73,9 @@
     <!-- Enroll -->
     <div class="step" id="step-enroll">
         <h1>Đăng ký giọng nói</h1>
-        <p class="subtitle">Hãy đọc to câu bên dưới &mdash; mẫu <span id="enroll-sample-num">1</span>/3</p>
+        <p class="subtitle">Hãy đọc to câu bên dưới &mdash; mẫu <span id="enroll-sample-num">1</span>/<span id="enroll-sample-total"></span></p>
 
-        <div class="progress" aria-hidden="true">
-            <div class="progress-seg"></div>
-            <div class="progress-seg"></div>
-            <div class="progress-seg"></div>
-        </div>
+        <div class="progress" id="enroll-progress" aria-hidden="true"></div>
 
         <div class="mic-field">
             <label for="enroll-mic-select">Micro</label>

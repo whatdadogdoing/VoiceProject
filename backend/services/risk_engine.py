@@ -19,8 +19,17 @@ SPOOF_THRESHOLD = 0.5
 # Minimum speaker-match (cosine similarity) score, and the stricter bar used
 # when the surrounding context looks unusual. Named so the evaluation script
 # (scripts/evaluate_thresholds.py) measures exactly the values that are deployed.
+#
+# The strict bar was first 0.85, an unmeasured default. In-app genuine takes
+# scored 0.80-0.82 on average against a 3-5 sample voiceprint, so 0.85 would have
+# rejected 65-73% of them (0.85 also happened to be ADAPT_MIN_SCORE below). 0.78
+# is the smallest value at which none of the 16 impostor and 10 clone clips was
+# accepted in 300 random templates (the highest scored 0.777), while rejecting
+# about 23-33% of genuine takes -- acceptable for a bar that only applies in an
+# unusual context. The impostor clips came from other recording domains and only
+# a few speakers, so treat the false-acceptance side as indicative.
 MATCH_THRESHOLD = 0.7
-STRICT_MATCH_THRESHOLD = 0.85
+STRICT_MATCH_THRESHOLD = 0.78
 
 # Rejections that are about recording quality, not about who is speaking: a
 # bad mic, a misread phrase. They stay in voice_auth_attempts as an audit trail

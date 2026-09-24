@@ -180,6 +180,12 @@ async function startEnrollUI() {
     await micSetup;
     enrollPhrases = data.phrases;
     enrollIndex = 0;
+    // how many samples enrollment needs is the server's decision, so the counter
+    // and the progress bar are drawn from it rather than hard-coded
+    qs('enroll-sample-total').textContent = enrollPhrases.length;
+    qs('enroll-progress').replaceChildren(
+        ...enrollPhrases.map(() => Object.assign(document.createElement('div'), { className: 'progress-seg' }))
+    );
     showEnrollPhrase();
 }
 
