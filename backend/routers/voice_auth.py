@@ -2,7 +2,7 @@ import asyncio
 import json
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
-from services.speaker_verification import embed, cosine_similarity, adapt_embedding
+from services.speaker_verification import embed, cosine_similarity, adapt_embedding, ENCODER_ID, EMBEDDING_DIM
 from services.anti_spoofing import analyze
 from services.phrase_check import check_phrase
 from services.audio import to_wav_pcm16, is_too_quiet
@@ -15,7 +15,7 @@ from services.auth import get_current_user_id
 from services.redis_client import get_redis
 from services.phrases import next_verify_phrase
 from models.db import (
-    get_user_embedding, get_user_email, has_voiceprint, log_attempt,
+    get_user_embedding, get_voiceprint_model_id, get_user_email, has_voiceprint, log_attempt,
     is_known_device, is_known_ip, update_voiceprint_embedding
 )
 from utils import get_client_ip, get_device_fingerprint, local_hour
@@ -87,6 +87,13 @@ async def verify(
     enrolled_embedding = await get_user_embedding(user_id)
     if not enrolled_embedding:
         raise HTTPException(404, "User chưa đăng ký voiceprint")
+
+    # A voiceprint made by a different encoder (or of a different size) lives in
+    # another embedding space; comparing it would give a meaningless score or crash
+    # on the size mismatch. Say so, and let the owner re-enroll. This is not a
+    # security failure, so it is neither logged as an attempt nor counted anywhere.
+    if await get_voiceprint_model_id(user_id) != ENCODER_ID or len(enrolled_embedding) != EMBEDDING_DIM:
+        return {"decision": "rejected", "reason": "voiceprint_outdated"}
 
     client_ip = get_client_ip(request)
     device_fp = get_device_fingerprint(request)

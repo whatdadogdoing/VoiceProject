@@ -448,6 +448,8 @@ function verifyFailureMessage(data) {
             return 'Phát hiện dấu hiệu tấn công giả mạo giọng nói nghiêm trọng. Tài khoản đã bị khoá xác thực giọng nói cho đến khi bạn xác thực lại qua email.';
         case 'rate_limit_exceeded':
             return 'Bạn đã thử quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.';
+        case 'voiceprint_outdated':
+            return 'Hồ sơ giọng nói của bạn được tạo bằng một phiên bản cũ của hệ thống nên không thể dùng nữa. Hãy đăng ký lại giọng nói bằng nút bên dưới.';
         default:
             return 'Xác thực thất bại. Đây là câu mới, hãy thử lại.';
     }

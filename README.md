@@ -99,7 +99,8 @@ flowchart LR
 | `backend/routers/enroll.py` | enrollment & re-enrollment sample submission |
 | `backend/services/risk_engine.py` | score thresholds, rate limits, the persistent fraud lock |
 | `backend/services/anti_spoofing.py` | AASIST-L inference (ONNX Runtime) |
-| `backend/services/speaker_verification.py` | Resemblyzer embeddings |
+| `backend/services/speaker_verification.py` | Resemblyzer embeddings, and `ENCODER_ID` naming the embedding space |
+| `backend/migrations/` | hand-applied SQL for databases that already exist (`schema.sql` only runs on a fresh volume) |
 | `backend/services/stt.py` | Whisper speech-to-text (`base` fast pass, `small` second opinion) |
 | `backend/services/phrase_check.py` | server-side phrase verification: `base` first, `small` only when `base` rejects |
 | `frontend/` | nginx + vanilla HTML/CSS/JS, reverse-proxies `/api/*` |
@@ -114,6 +115,8 @@ flowchart LR
 cp .env.example .env   # fill in real values: Gmail app password, JWT secret, etc.
 docker compose up -d
 ```
+
+`JWT_SECRET` must be a real random value: the backend refuses to start if it is missing, still the `.env.example` placeholder, or shorter than 16 characters (`python -c "import secrets; print(secrets.token_urlsafe(48))"` makes a good one).
 
 → **`http://localhost:3000`**. The backend is never exposed directly — everything routes through nginx.
 
@@ -167,6 +170,8 @@ The deciding factor across all three wasn't voice quality — it was whether the
 - AASIST-L runs from a PyTorch→ONNX export (`backend/scripts/export_aasist_onnx.py`) instead of raw PyTorch — verified numerically identical (< 1e-8 max diff on random inputs) and ~2.6x faster per call (983ms → 378ms on 2 CPU threads), which matters on the resource-constrained hardware below.
 - The challenge phrase is checked against server-side speech-to-text output (Whisper `base`, then `small` if `base` rejects), not a client-supplied transcript — a client (browser or script) has no way to skip or fake this check.
 - Debugging aid, off by default: if the directory `backend/eval_data/rejected/` exists, the audio of an enrollment sample rejected as a suspected spoof is saved there (score and time in the file name), so a false positive on a genuine voice can be inspected instead of guessed at (`services/debug_capture.py`). `backend/eval_data/` is git-ignored and Docker-ignored because it is where real voice recordings go.
+- Each stored voiceprint records which encoder produced it (`voiceprints.model_id`, `embedding_dim`). Vectors from a different encoder, a different set of weights or a changed preprocessing step live in another space and cannot be compared, so `/verify` answers `voiceprint_outdated` (no model runs, no attempt is logged) and points the user at re-enrollment instead of producing a meaningless score or crashing on a size mismatch. Bump `ENCODER_ID` in `services/speaker_verification.py` whenever the encoder changes. For a database that already exists, apply `backend/migrations/001_voiceprint_encoder_id.sql` once with `docker compose exec -T postgres psql -U user -d voiceauth < backend/migrations/001_voiceprint_encoder_id.sql`; it is idempotent, and existing voiceprints are labelled with what they are (Resemblyzer, 256 dimensions).
+- OTP abuse is limited in two places: `services/otp.py` (a code lives 300 s and is invalidated after 5 wrong guesses) and `routers/voice_auth.py` (`@limiter.limit` on the endpoints: sending a code 3 per minute, checking one 5 per minute, for both the normal and the recovery flow).
 - Single-user personal/academic project — not hardened for multi-user production traffic.
 - Developed on a resource-constrained Windows/WSL2/Docker Desktop setup. Stability there needed explicit `.wslconfig` memory/CPU/swap limits and `init: true` on the heavier container (to reap zombie processes from ML library threads) — both host-specific, so `.wslconfig` isn't committed here.
 - `backend/tests/` has a pytest suite for the security-critical logic (risk engine decisions, phrase matching, JWT auth-method checks, IP header handling, login lockout) that doesn't need Postgres/Redis running — `pip install -r requirements-dev.txt && pytest` from `backend/`.

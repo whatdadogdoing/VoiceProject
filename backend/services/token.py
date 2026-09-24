@@ -2,7 +2,26 @@ import jwt
 import os
 from datetime import datetime, timedelta, timezone
 
-SECRET = os.getenv("JWT_SECRET")
+# The signing key must be a real secret. Without this check a missing variable only
+# fails later, at the first login, and a copy of .env.example that keeps its
+# placeholder would quietly sign every access token with a string that is public in
+# the repository. Refusing to start turns both into an obvious startup error.
+PLACEHOLDER_SECRET = "replace-with-a-random-secret"  # the value shipped in .env.example
+MIN_SECRET_LENGTH = 16
+
+
+def _load_secret() -> str:
+    secret = os.getenv("JWT_SECRET", "")
+    if not secret or secret == PLACEHOLDER_SECRET or len(secret) < MIN_SECRET_LENGTH:
+        raise RuntimeError(
+            "JWT_SECRET is missing, still the .env.example placeholder, or shorter than "
+            f"{MIN_SECRET_LENGTH} characters. Set a random value in .env, for example: "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    return secret
+
+
+SECRET = _load_secret()
 
 
 def create_access_token(user_id: str, auth_methods: list[str]) -> str:

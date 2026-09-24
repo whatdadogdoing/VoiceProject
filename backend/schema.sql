@@ -17,7 +17,14 @@ CREATE TABLE voiceprints (
     embedding FLOAT4[] NOT NULL,
     enrolled_at TIMESTAMP DEFAULT NOW(),
     last_used_at TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+    is_active BOOLEAN DEFAULT TRUE,
+    -- Which encoder produced the vector. Embeddings from different encoders (or
+    -- versions) live in different spaces and cannot be compared, so /verify
+    -- refuses a voiceprint whose encoder is not the current one and asks the user
+    -- to re-enroll. The defaults describe the rows that existed before these
+    -- columns did: Resemblyzer, 256 dimensions.
+    model_id VARCHAR(64) NOT NULL DEFAULT 'resemblyzer-0.1.4',
+    embedding_dim INT NOT NULL DEFAULT 256
 );
 CREATE UNIQUE INDEX idx_voiceprints_user_active ON voiceprints(user_id) WHERE is_active = TRUE;
 

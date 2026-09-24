@@ -3,6 +3,12 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 import os
 from services.redis_client import get_redis
 
+# What limits OTP abuse is split across two files, so both are named here:
+#  - this module: a code lives OTP_TTL_SECONDS, and after MAX_OTP_ATTEMPTS wrong
+#    guesses it is invalidated outright rather than left to expire;
+#  - routers/voice_auth.py: how often a code can be requested or checked, as
+#    @limiter.limit decorators on the endpoints -- /otp/send and /recovery/otp/send
+#    at 3 per minute, /otp/verify and /recovery/otp/verify at 5 per minute.
 MAX_OTP_ATTEMPTS = 5
 OTP_TTL_SECONDS = 300
 

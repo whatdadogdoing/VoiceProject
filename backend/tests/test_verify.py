@@ -40,6 +40,8 @@ def voice_auth(monkeypatch, fake_redis):
             embed=lambda wav: [0.1, 0.2],
             cosine_similarity=lambda a, b: 0.0,
             adapt_embedding=lambda enrolled, sample: [9.9, 9.9],
+            ENCODER_ID="test-encoder",
+            EMBEDDING_DIM=2,   # matches the 2-number fake embeddings below
         ),
         "services.anti_spoofing": types.SimpleNamespace(analyze=lambda wav: 0.1),
         "services.phrase_check": types.SimpleNamespace(check_phrase=lambda wav, phrase: True),
@@ -60,6 +62,9 @@ def voice_auth(monkeypatch, fake_redis):
     async def get_user_embedding(user_id):
         return [0.1, 0.2]
 
+    async def get_voiceprint_model_id(user_id):
+        return "test-encoder"
+
     async def update_voiceprint_embedding(user_id, embedding):
         calls.updated.append((user_id, embedding))
 
@@ -72,6 +77,7 @@ def voice_auth(monkeypatch, fake_redis):
     monkeypatch.setattr(module, "get_redis", lambda: fake_redis)
     monkeypatch.setattr(module, "has_active_consent", async_true)
     monkeypatch.setattr(module, "get_user_embedding", get_user_embedding)
+    monkeypatch.setattr(module, "get_voiceprint_model_id", get_voiceprint_model_id)
     monkeypatch.setattr(module, "update_voiceprint_embedding", update_voiceprint_embedding)
     monkeypatch.setattr(module, "log_attempt", log_attempt)
     monkeypatch.setattr(module, "is_known_device", async_true)
@@ -121,3 +127,42 @@ async def test_borderline_match_passes_but_does_not_move_the_template(voice_auth
     )
     assert "access_token" in response
     assert calls.updated == []
+
+
+async def test_a_voiceprint_from_another_encoder_asks_for_re_enrollment(voice_auth, monkeypatch, fake_redis):
+    # Vectors from a different encoder live in another embedding space; comparing
+    # them would give a meaningless score. The user is told to re-enroll instead.
+    module, calls = voice_auth
+
+    async def old_encoder(user_id):
+        return "some-older-encoder"
+
+    monkeypatch.setattr(module, "get_voiceprint_model_id", old_encoder)
+    monkeypatch.setattr(module, "embed", lambda wav: pytest.fail("no model should run for an incompatible voiceprint"))
+
+    result = await _verify_with_score(module, monkeypatch, fake_redis, 0.99)
+
+    assert result == {"decision": "rejected", "reason": "voiceprint_outdated"}
+    assert calls.logged == []                      # not a security failure, so not an attempt
+    assert not await fake_redis.exists("voice_passed:u1")
+
+
+async def test_a_voiceprint_of_the_wrong_size_is_refused_not_compared(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+
+    async def wrong_size(user_id):
+        return [0.1, 0.2, 0.3]                     # the encoder now produces 2 numbers
+
+    monkeypatch.setattr(module, "get_user_embedding", wrong_size)
+
+    result = await _verify_with_score(module, monkeypatch, fake_redis, 0.99)
+
+    assert result == {"decision": "rejected", "reason": "voiceprint_outdated"}
+
+
+async def test_a_voiceprint_from_the_current_encoder_verifies_normally(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+
+    result = await _verify_with_score(module, monkeypatch, fake_redis, 0.9)
+
+    assert result["decision"] == "mfa_required"

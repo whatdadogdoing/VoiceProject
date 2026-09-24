@@ -93,28 +93,41 @@ async def is_known_ip(user_id: str, ip: str | None) -> bool:
         return row is not None
 
 
-async def save_voiceprint(user_id: str, embedding: list[float], replace_existing: bool = False) -> None:
+async def get_voiceprint_model_id(user_id: str) -> str | None:
+    """Which encoder produced the user's active voiceprint (None if there is none)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT model_id FROM voiceprints WHERE user_id=$1 AND is_active=TRUE",
+            user_id
+        )
+
+
+async def save_voiceprint(user_id: str, embedding: list[float], model_id: str,
+                          replace_existing: bool = False) -> None:
     """First-time enrollment just inserts. Re-enrollment stages the new
     embedding as an inactive row first, then swaps it in and removes the old
     row in one transaction — the old voiceprint keeps working right up until
     the new one is fully captured, instead of being wiped before the
-    replacement exists."""
+    replacement exists. `model_id` names the encoder that produced the vector,
+    so a later encoder change can be detected instead of compared blindly."""
     pool = await get_pool()
     if not replace_existing:
         async with pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO voiceprints (user_id, embedding) VALUES ($1, $2)",
-                user_id, embedding
+                "INSERT INTO voiceprints (user_id, embedding, model_id, embedding_dim) "
+                "VALUES ($1, $2, $3, $4)",
+                user_id, embedding, model_id, len(embedding)
             )
         return
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             new_id = await conn.fetchval("""
-                INSERT INTO voiceprints (user_id, embedding, is_active)
-                VALUES ($1, $2, FALSE)
+                INSERT INTO voiceprints (user_id, embedding, is_active, model_id, embedding_dim)
+                VALUES ($1, $2, FALSE, $3, $4)
                 RETURNING id
-            """, user_id, embedding)
+            """, user_id, embedding, model_id, len(embedding))
             await conn.execute(
                 "UPDATE voiceprints SET is_active=FALSE WHERE user_id=$1 AND id != $2",
                 user_id, new_id

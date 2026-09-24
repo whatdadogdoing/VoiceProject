@@ -48,6 +48,7 @@ def enroll(monkeypatch, fake_redis):
             embed=lambda wav: [0.1, 0.2],
             average_embedding=lambda embeddings: embeddings[0],
             ENROLL_SAMPLES_REQUIRED=3,
+            ENCODER_ID="test-encoder",
         ),
         "services.anti_spoofing": types.SimpleNamespace(analyze=lambda wav: 0.0),
         "services.audio": types.SimpleNamespace(to_wav_pcm16=lambda b: b),
@@ -58,7 +59,7 @@ def enroll(monkeypatch, fake_redis):
     monkeypatch.delitem(sys.modules, "routers.enroll", raising=False)
     module = importlib.import_module("routers.enroll")
 
-    calls = types.SimpleNamespace(saved=[], logged=[])
+    calls = types.SimpleNamespace(saved=[], saved_models=[], logged=[])
 
     async def has_consent(user_id):
         return True
@@ -66,8 +67,9 @@ def enroll(monkeypatch, fake_redis):
     async def has_voiceprint(user_id):
         return False
 
-    async def save_voiceprint(user_id, embedding, replace_existing=False):
+    async def save_voiceprint(user_id, embedding, model_id, replace_existing=False):
         calls.saved.append((user_id, embedding, replace_existing))
+        calls.saved_models.append(model_id)
 
     async def log_attempt(user_id, voiceprint_score, spoof_score, decision, reason, ip=None, device=None):
         calls.logged.append({
@@ -242,6 +244,8 @@ async def test_completing_enrollment_saves_voiceprint_and_seeds_trusted_device(e
 
     assert result["status"] == "enrolled"
     assert len(calls.saved) == 1
+    # the voiceprint is stored together with the encoder that produced it
+    assert calls.saved_models == ["test-encoder"]
     assert calls.logged == [{
         "user_id": "u1", "voiceprint_score": None, "spoof_score": None,
         "decision": "enrolled", "reason": None, "ip": "198.51.100.7", "device": "dev-abc",

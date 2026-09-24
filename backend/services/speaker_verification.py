@@ -18,6 +18,15 @@ from resemblyzer import VoiceEncoder, preprocess_wav
 # threshold, but separation improves) for two more phrases at enrollment.
 ENROLL_SAMPLES_REQUIRED = 5
 
+# Names the embedding space. It is stored with every voiceprint, and /verify
+# refuses one made by a different encoder: vectors from another model, another
+# set of weights, or a changed preprocessing step are not comparable, so cosine
+# similarity between them would be meaningless (or crash on a size mismatch).
+# Bump ENCODER_ID whenever the encoder or anything that changes its output does,
+# so old voiceprints are recognised and their owners asked to re-enroll.
+ENCODER_ID = "resemblyzer-0.1.4"
+EMBEDDING_DIM = 256
+
 _encoder: VoiceEncoder | None = None
 
 

@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
-from services.speaker_verification import embed, average_embedding, ENROLL_SAMPLES_REQUIRED
+from services.speaker_verification import embed, average_embedding, ENROLL_SAMPLES_REQUIRED, ENCODER_ID
 from services.phrases import random_phrases, another_phrase
 from services.phrase_check import check_phrase
 from services.debug_capture import save_rejected
@@ -142,7 +142,7 @@ async def submit_sample(
     if len(state["embeddings"]) >= ENROLL_SAMPLES_REQUIRED:
         voiceprint = average_embedding(state["embeddings"])
         is_reenroll = await has_voiceprint(user_id)
-        await save_voiceprint(user_id, voiceprint, replace_existing=is_reenroll)
+        await save_voiceprint(user_id, voiceprint, model_id=ENCODER_ID, replace_existing=is_reenroll)
         await get_redis().delete(f"enroll:{user_id}")
         # Enrolling took a password session + consent from this very browser, so
         # treat it as the first trusted device/IP. Otherwise a brand-new user has
