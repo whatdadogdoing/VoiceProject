@@ -15,6 +15,7 @@ class FakeRedis:
 
     def __init__(self):
         self._store: dict[str, str] = {}
+        self._lists: dict[str, list[str]] = {}
 
     async def get(self, key):
         val = self._store.get(key)
@@ -39,6 +40,21 @@ class FakeRedis:
 
     async def expire(self, key, ttl):
         pass
+
+    async def lpush(self, key, value):
+        self._lists.setdefault(key, []).insert(0, str(value))
+
+    async def lrange(self, key, start, end):
+        lst = self._lists.get(key, [])
+        if end == -1:
+            end = len(lst) - 1
+        return [v.encode() for v in lst[start:end + 1]]
+
+    async def ltrim(self, key, start, end):
+        lst = self._lists.get(key, [])
+        if end == -1:
+            end = len(lst) - 1
+        self._lists[key] = lst[start:end + 1]
 
 
 @pytest.fixture

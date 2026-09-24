@@ -10,7 +10,7 @@ from routers.enroll import router as enroll_router
 from services.rate_limiter import limiter
 from services.anti_spoofing import load_model as load_antispoofing_model
 from services.speaker_verification import load_encoder as load_speaker_encoder
-from services.stt import load_model as load_stt_model
+from services.stt import load_models as load_speech_models
 from models.db import get_pool
 
 
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     await get_pool()
     load_antispoofing_model()
     load_speaker_encoder()
-    load_stt_model()
+    load_speech_models()
     yield
 
 

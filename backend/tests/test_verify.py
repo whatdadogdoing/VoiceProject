@@ -42,7 +42,7 @@ def voice_auth(monkeypatch, fake_redis):
             adapt_embedding=lambda enrolled, sample: [9.9, 9.9],
         ),
         "services.anti_spoofing": types.SimpleNamespace(analyze=lambda wav: 0.1),
-        "services.stt": types.SimpleNamespace(transcribe=lambda wav: ""),
+        "services.phrase_check": types.SimpleNamespace(check_phrase=lambda wav, phrase: True),
         "services.audio": types.SimpleNamespace(to_wav_pcm16=lambda b: b, is_too_quiet=lambda wav: False),
         "services.otp": types.SimpleNamespace(send_otp=None, verify_otp=None),
         "services.rate_limiter": types.SimpleNamespace(limiter=_PassthroughLimiter()),
@@ -77,7 +77,7 @@ def voice_auth(monkeypatch, fake_redis):
     monkeypatch.setattr(module, "is_known_device", async_true)
     monkeypatch.setattr(module, "is_known_ip", async_true)
     monkeypatch.setattr(module, "evaluate", evaluate)
-    monkeypatch.setattr(module, "transcribe", lambda wav: PHRASE)
+    monkeypatch.setattr(module, "check_phrase", lambda wav, phrase: True)
     monkeypatch.setattr(module, "verify_otp", async_true)
 
     yield module, calls

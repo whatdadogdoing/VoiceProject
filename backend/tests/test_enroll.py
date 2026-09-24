@@ -4,8 +4,8 @@ enrollment samples, and the trusted device/IP seeded when enrollment completes.
 routers.enroll pulls in the ML stack (Vosk, Resemblyzer, ONNX Runtime) and
 ffmpeg-backed audio decoding at import time, none of which a unit test should
 need. Those modules are stubbed before the router is imported; Redis and
-Postgres are faked. The real submit_sample logic and the real matches_phrase
-run unmodified.
+Postgres are faked. The real submit_sample logic runs unmodified; the phrase
+check is stubbed (it has its own tests in test_phrase_check.py).
 """
 import importlib
 import json
@@ -42,7 +42,7 @@ def _request(headers=None):
 @pytest.fixture
 def enroll(monkeypatch, fake_redis):
     stubs = {
-        "services.stt": types.SimpleNamespace(transcribe=lambda wav: ""),
+        "services.phrase_check": types.SimpleNamespace(check_phrase=lambda wav, phrase: True),
         "services.speaker_verification": types.SimpleNamespace(
             embed=lambda wav: [0.1, 0.2],
             average_embedding=lambda embeddings: embeddings[0],
@@ -79,9 +79,10 @@ def enroll(monkeypatch, fake_redis):
     monkeypatch.setattr(module, "save_voiceprint", save_voiceprint)
     monkeypatch.setattr(module, "log_attempt", log_attempt)
     monkeypatch.setattr(module, "get_redis", lambda: fake_redis)
-    # returns every assigned phrase, so matches_phrase passes for whichever
-    # sample index the test is on
-    monkeypatch.setattr(module, "transcribe", lambda wav: " ".join(PHRASES))
+    # the phrase is always judged correct, whichever sample index the test is on
+    monkeypatch.setattr(module, "check_phrase", lambda wav, phrase: True)
+    # never let a test write into the real capture directory (backend/eval_data/rejected)
+    monkeypatch.setattr(module, "save_rejected", lambda wav, tag, score: None)
 
     yield module, calls
 
@@ -111,6 +112,29 @@ async def test_spoofed_sample_is_rejected_and_state_unchanged(enroll, monkeypatc
     assert calls.saved == []
     # not logged as an attempt: that would feed the fraud-lockout counter
     assert calls.logged == []
+
+
+async def test_a_spoof_rejected_sample_is_handed_to_the_opt_in_capture(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    monkeypatch.setattr(module, "analyze", lambda wav: 0.594)
+    captured = []
+    monkeypatch.setattr(module, "save_rejected", lambda wav, tag, score: captured.append((tag, score)))
+    await _seed_state(fake_redis, [])
+
+    await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert captured == [("enroll-spoof", 0.594)]
+
+
+async def test_a_clean_sample_is_not_captured(enroll, monkeypatch, fake_redis):
+    module, calls = enroll
+    captured = []
+    monkeypatch.setattr(module, "save_rejected", lambda wav, tag, score: captured.append(tag))
+    await _seed_state(fake_redis, [])
+
+    await module.submit_sample(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert captured == []
 
 
 async def test_sample_exactly_at_threshold_is_rejected(enroll, monkeypatch, fake_redis):

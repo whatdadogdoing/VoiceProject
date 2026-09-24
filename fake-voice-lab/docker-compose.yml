@@ -8,6 +8,12 @@ services:
       - ./data:/app/data
     environment:
       - AUTH_BACKEND_URL=http://backend:8000
+      # huggingface_hub's default cache symlinks the model's external-data file
+      # into a separate blobs/<hash> directory; onnxruntime's path-traversal
+      # guard then rejects it as escaping the model's own directory. Disabling
+      # symlinks makes the hub copy files directly into snapshots/ instead, so
+      # everything the ONNX session needs sits in one real directory.
+      - HF_HUB_DISABLE_SYMLINKS=1
 
 networks:
   default:

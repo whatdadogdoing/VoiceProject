@@ -11,6 +11,8 @@ fake-voice-lab/data/
 security-tests/reference/
 security-tests/output/
 backend/services/weights/vosk-model-small-vn-0.4/
+backend/services/weights/faster-whisper-small/
+backend/services/weights/vosk-model-vn-0.4/
 
 # editor / OS
 .vscode/
@@ -21,3 +23,8 @@ Thumbs.db
 
 # generated documentation containing personal info (student name/ID, advisor) -- not for the public repo
 docs/
+
+# threshold-evaluation recordings (the author's own voice and another real person's) and their outputs
+backend/eval_data/
+backend/eval_results/
+backend/_smoke_eval/

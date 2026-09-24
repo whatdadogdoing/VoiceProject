@@ -32,10 +32,13 @@ class VoiceRecorder {
         const audioConstraints = {
             sampleRate: 16000,
             channelCount: 1,
-            // AASIST-L was trained on unprocessed ASVspoof2019 audio; browser-side
-            // noise suppression smooths spectral detail in ways that read as
-            // vocoder-like artifacts to the anti-spoofing model, causing false
-            // "spoofing_detected" rejections on genuine speech.
+            // Kept off. Measured A/B on 10 recordings each way: with the browser's
+            // own noise suppression / AGC / echo cancellation ON, speech-to-text
+            // could place only 4 of 10 clips against a challenge phrase (9 of 10
+            // with it off), 3 of 10 were flagged as spoofed by AASIST-L (0 of 10
+            // off), and the speaker match dropped. AASIST-L was trained on
+            // unprocessed ASVspoof2019 audio, so processed speech reads as
+            // vocoder-like and causes false "spoofing_detected" rejections.
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false

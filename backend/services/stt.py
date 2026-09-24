@@ -1,58 +1,76 @@
 import io
-import json
 import os
-import urllib.request
 import wave
-import zipfile
 
-from vosk import KaldiRecognizer, Model, SetLogLevel
+import numpy as np
 
-SetLogLevel(-1)  # silence Vosk's default verbose C++ logging
+# Where the speech models live. Under docker-compose this is a named volume
+# (MODELS_DIR=/opt/models), not the bind-mounted ./backend: reading these
+# 140-460 MB files through the Windows -> VM bind mount has hung the process
+# indefinitely (uninterruptible disk wait, never returned) three times in one
+# day. A plain local run without MODELS_DIR uses services/weights.
+_MODELS_DIR = os.environ.get("MODELS_DIR", os.path.join(os.path.dirname(__file__), "weights"))
 
-_MODEL_NAME = "vosk-model-small-vn-0.4"
-_MODEL_URL = f"https://alphacephei.com/vosk/models/{_MODEL_NAME}.zip"
-_WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "weights")
-_MODEL_DIR = os.path.join(_WEIGHTS_DIR, _MODEL_NAME)
-
-_model: Model | None = None
-
-
-def _ensure_model_downloaded() -> None:
-    if os.path.isdir(_MODEL_DIR):
-        return
-    os.makedirs(_WEIGHTS_DIR, exist_ok=True)
-    zip_path = _MODEL_DIR + ".zip"
-    urllib.request.urlretrieve(_MODEL_URL, zip_path)
-    with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(_WEIGHTS_DIR)
-    os.remove(zip_path)
-
-
-def load_model() -> None:
-    global _model
-    if _model is None:
-        _ensure_model_downloaded()
-        _model = Model(_MODEL_DIR)
+# Speech-to-text for the challenge phrase runs on the audio the server actually
+# received -- never on a client-supplied transcript, which a caller could simply
+# leave empty or fabricate to skip the check.
+#
+# Two Whisper sizes, cheap one first (see services/phrase_check.py). Measured on
+# this 2-core CPU against recordings made in the app's own browser recorder:
+#   Vosk (Vietnamese, both model sizes)   passed 5/17 at the 0.6 word-match bar,
+#                                         0/9 on the app's raw recordings; wider
+#                                         decoder search and a better resampler
+#                                         barely moved it, and turning the
+#                                         browser's own noise suppression on made
+#                                         the audio worse -- so Vosk was dropped
+#   Whisper base, beam 5   ~3 s per clip, passed 12/15
+#   Whisper small, beam 1  ~10 s per clip, passed ~all (Whisper always processes
+#                          a 30 s window, so clip length barely changes its cost)
+# temperature=0 disables faster-whisper's re-decode-at-higher-temperature retries
+# and without_timestamps skips timestamp tokens: about 20-30% faster on "small"
+# with identical accuracy.
+_BEAM = {"base": 5, "small": 1}
+_models: dict = {}
 
 
-def transcribe(wav_bytes: bytes) -> str:
-    """Offline Vietnamese speech-to-text on 16kHz mono PCM16 WAV bytes.
+def _load(size: str):
+    if size not in _models:
+        from faster_whisper import WhisperModel  # heavy; imported only when first needed
+        # Use the copy in MODELS_DIR when it is there; otherwise let faster-whisper
+        # download it into MODELS_DIR, so a fresh clone still works.
+        local = os.path.join(_MODELS_DIR, f"faster-whisper-{size}")
+        _models[size] = WhisperModel(
+            local if os.path.isdir(local) else size,
+            device="cpu", compute_type="int8", cpu_threads=2, download_root=_MODELS_DIR,
+        )
+    return _models[size]
 
-    This exists so phrase-matching checks what was actually said in the
-    submitted audio, instead of trusting a client-supplied transcript field
-    -- a client (or a script bypassing the browser entirely) could otherwise
-    submit any audio with an empty/fabricated transcript and skip the
-    challenge-phrase check altogether.
-    """
-    load_model()
+
+def load_models() -> None:
+    """Load both models up front (called at startup): otherwise the first sample
+    after every restart pays several extra seconds, and a model-file problem would
+    surface in the middle of a user's request instead of where it is visible."""
+    for size in _BEAM:
+        _load(size)
+
+
+def _transcribe(size: str, wav_bytes: bytes) -> str:
+    model = _load(size)
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        recognizer = KaldiRecognizer(_model, wf.getframerate())
-        parts = []
-        while True:
-            data = wf.readframes(4000)
-            if not data:
-                break
-            if recognizer.AcceptWaveform(data):
-                parts.append(json.loads(recognizer.Result()).get("text", ""))
-        parts.append(json.loads(recognizer.FinalResult()).get("text", ""))
-    return " ".join(p for p in parts if p).strip()
+        pcm16 = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+    audio = pcm16.astype(np.float32) / 32768.0
+    segments, _ = model.transcribe(
+        audio, language="vi", beam_size=_BEAM[size], condition_on_previous_text=False,
+        temperature=0.0, without_timestamps=True,
+    )
+    return " ".join(s.text.strip() for s in segments).strip()
+
+
+def transcribe_fast(wav_bytes: bytes) -> str:
+    """Vietnamese speech-to-text on 16kHz mono PCM16 WAV bytes: Whisper base, ~3 s."""
+    return _transcribe("base", wav_bytes)
+
+
+def transcribe_accurate(wav_bytes: bytes) -> str:
+    """Slower, more accurate second opinion: Whisper small, ~10 s."""
+    return _transcribe("small", wav_bytes)

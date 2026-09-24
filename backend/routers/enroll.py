@@ -3,8 +3,9 @@ import json
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from services.speaker_verification import embed, average_embedding, ENROLL_SAMPLES_REQUIRED
-from services.phrases import random_phrases, another_phrase, matches_phrase
-from services.stt import transcribe
+from services.phrases import random_phrases, another_phrase
+from services.phrase_check import check_phrase
+from services.debug_capture import save_rejected
 from services.anti_spoofing import analyze
 from services.risk_engine import SPOOF_THRESHOLD
 from services.audio import to_wav_pcm16
@@ -84,8 +85,7 @@ async def submit_sample(
     except Exception:
         raise HTTPException(400, "Không đọc được file âm thanh, hãy thử ghi âm lại")
 
-    server_transcript = await asyncio.to_thread(transcribe, wav_bytes)
-    if not matches_phrase(expected_phrase, server_transcript):
+    if not await asyncio.to_thread(check_phrase, wav_bytes, expected_phrase):
         return {
             "status": "phrase_mismatch",
             "message": "Câu đọc không khớp với câu được yêu cầu, hãy thử lại",
@@ -105,6 +105,7 @@ async def submit_sample(
         # the server log only (never to the client) so the threshold can be
         # calibrated against real recordings.
         logger.info("enrollment sample rejected as suspected spoof (user=%s, score=%.3f)", user_id, spoof_score)
+        save_rejected(wav_bytes, "enroll-spoof", spoof_score)
         return {
             "status": "spoof_detected",
             "message": "Giọng thu được có dấu hiệu là giọng tổng hợp hoặc bản ghi lại. "

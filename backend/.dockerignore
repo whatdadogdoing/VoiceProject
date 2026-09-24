@@ -1,0 +1,12 @@
+# Keep personal recordings and large downloaded models out of the image.
+# docker-compose bind-mounts ./backend over /app at runtime, so none of this is
+# needed inside the image; copying it only bloats every build and bakes the
+# author's (and a third party's) voice recordings into an image layer.
+eval_data/
+eval_results/
+_smoke_eval/
+services/weights/faster-whisper-small/
+services/weights/vosk-model-small-vn-0.4/
+services/weights/vosk-model-vn-0.4/
+**/__pycache__/
+.pytest_cache/

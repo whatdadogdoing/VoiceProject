@@ -4,7 +4,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
 from services.speaker_verification import embed, cosine_similarity, adapt_embedding
 from services.anti_spoofing import analyze
-from services.stt import transcribe
+from services.phrase_check import check_phrase
 from services.audio import to_wav_pcm16, is_too_quiet
 from services.risk_engine import evaluate, fraud_lock_key, should_adapt_voiceprint
 from services.otp import send_otp, verify_otp
@@ -13,7 +13,7 @@ from services.consent import has_active_consent, record_consent, revoke_consent
 from services.rate_limiter import limiter
 from services.auth import get_current_user_id
 from services.redis_client import get_redis
-from services.phrases import next_verify_phrase, matches_phrase
+from services.phrases import next_verify_phrase
 from models.db import (
     get_user_embedding, get_user_email, has_voiceprint, log_attempt,
     is_known_device, is_known_ip, update_voiceprint_embedding
@@ -105,8 +105,7 @@ async def verify(
         )
         return {"decision": "rejected", "reason": "audio_too_quiet"}
 
-    server_transcript = await asyncio.to_thread(transcribe, wav_bytes)
-    if not matches_phrase(expected_phrase, server_transcript):
+    if not await asyncio.to_thread(check_phrase, wav_bytes, expected_phrase):
         await log_attempt(
             user_id, None, None, "rejected", "phrase_mismatch",
             ip=client_ip, device=device_fp

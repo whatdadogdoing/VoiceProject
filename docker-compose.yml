@@ -4,6 +4,12 @@ services:
     expose:
       - "8000"
     env_file: .env
+    environment:
+      # The speech models (Vosk 168 MB, Whisper 464 MB) live in the "models"
+      # volume, not under ./backend: reading files this size through the
+      # Windows -> VM bind mount hung the process in uninterruptible disk wait
+      # several times. See services/stt.py.
+      MODELS_DIR: /opt/models
     depends_on:
       postgres:
         condition: service_healthy
@@ -11,6 +17,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - models:/opt/models
     healthcheck:
       # The ASGI app can't accept any TCP connection at all until model
       # loading (AASIST-L, Resemblyzer, Vosk) finishes inside the lifespan
@@ -65,3 +72,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  models:

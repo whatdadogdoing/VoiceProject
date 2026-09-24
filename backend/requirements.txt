@@ -12,5 +12,5 @@ pyjwt==2.9.0
 bcrypt==4.2.0
 pydub==0.25.1
 resemblyzer==0.1.4
-vosk==0.3.45
+faster-whisper==1.2.1
 onnxruntime==1.30.0
