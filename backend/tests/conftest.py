@@ -16,6 +16,7 @@ class FakeRedis:
     def __init__(self):
         self._store: dict[str, str] = {}
         self._lists: dict[str, list[str]] = {}
+        self._sets: dict[str, set[str]] = {}
 
     async def get(self, key):
         val = self._store.get(key)
@@ -29,9 +30,17 @@ class FakeRedis:
 
     async def delete(self, key):
         self._store.pop(key, None)
+        self._lists.pop(key, None)
+        self._sets.pop(key, None)
 
     async def exists(self, key):
-        return 1 if key in self._store else 0
+        return 1 if key in self._store or key in self._lists or key in self._sets else 0
+
+    async def sadd(self, key, *values):
+        self._sets.setdefault(key, set()).update(str(v) for v in values)
+
+    async def smembers(self, key):
+        return {v.encode() for v in self._sets.get(key, set())}
 
     async def incr(self, key):
         current = int(self._store.get(key, 0)) + 1

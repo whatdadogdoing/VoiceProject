@@ -33,42 +33,47 @@ def test_empty_expected_phrase_always_matches():
 
 
 def _force_earliest_candidate(monkeypatch):
-    # another_phrase() filters PHRASES down to candidates and calls
+    # next_verify_phrase() filters PHRASES down to candidates and calls
     # random.choice() on them; forcing it to always take the first candidate
-    # (preserving PHRASES' original order) makes phrase selection
-    # deterministic, so the reuse point demonstrated below is an exact call
-    # count instead of something that only shows up with the right random luck.
+    # (preserving PHRASES' original order) makes phrase selection deterministic,
+    # so the points below are exact call counts instead of something that only
+    # shows up with the right random luck.
     monkeypatch.setattr(phrases.random, "choice", lambda seq: seq[0])
 
 
-async def test_phrase_history_prevents_repeats_within_the_window(monkeypatch, fake_redis):
+async def test_no_phrase_is_issued_twice_until_the_whole_pool_has_been_used(monkeypatch, fake_redis):
+    """Regression test for the replay window. A recording of an earlier challenge
+    is genuine speech, so speaker match and AASIST cannot reject it; only a
+    different challenge sentence stops it. The first version excluded just the
+    last PHRASE_HISTORY_SIZE phrases, and the very first phrase came back on the
+    12th call. Now nothing repeats until every phrase has been issued once."""
     monkeypatch.setattr(phrases, "get_redis", lambda: fake_redis)
     _force_earliest_candidate(monkeypatch)
 
-    issued = [await next_verify_phrase("user-1") for _ in range(PHRASE_HISTORY_SIZE + 1)]
+    issued = [await next_verify_phrase("user-1") for _ in range(len(PHRASES))]
 
-    assert len(set(issued)) == len(issued)
+    assert len(set(issued)) == len(PHRASES)   # every phrase exactly once
 
 
-async def test_phrase_reappears_once_it_ages_out_of_the_history_window(monkeypatch, fake_redis):
-    """Demonstrates the actual limit of replay protection: next_verify_phrase
-    only excludes the last PHRASE_HISTORY_SIZE (10) challenges out of a fixed
-    pool of PHRASES (102). A phrase is not retired for good -- it becomes a
-    valid challenge again as soon as it ages out of that window. This matters
-    for a stored-audio replay attack: if an attacker already has a genuine
-    recording of the victim saying a phrase that resurfaces, that recording
-    passes speaker match, AASIST (it's real, unmodified speech, not synthetic)
-    and the phrase check together -- freshness is the only layer that was
-    ever defending against it, and this is its actual limit, not the 102-size
-    pool alone."""
+async def test_a_new_cycle_does_not_bring_back_the_most_recent_phrases(monkeypatch, fake_redis):
+    monkeypatch.setattr(phrases, "get_redis", lambda: fake_redis)
+    _force_earliest_candidate(monkeypatch)
+    issued = [await next_verify_phrase("user-1") for _ in range(len(PHRASES))]
+
+    after_reset = await next_verify_phrase("user-1")   # the pool is exhausted: a new cycle starts
+
+    assert after_reset not in issued[-PHRASE_HISTORY_SIZE:]
+
+
+async def test_the_used_record_is_kept_per_user(monkeypatch, fake_redis):
     monkeypatch.setattr(phrases, "get_redis", lambda: fake_redis)
     _force_earliest_candidate(monkeypatch)
 
-    first_phrase = await next_verify_phrase("user-1")
-    for _ in range(PHRASE_HISTORY_SIZE):
-        await next_verify_phrase("user-1")  # ages first_phrase out of the window
+    first_for_alice = await next_verify_phrase("alice")
+    await next_verify_phrase("alice")
+    first_for_bob = await next_verify_phrase("bob")
 
-    assert await next_verify_phrase("user-1") == first_phrase
+    assert first_for_bob == first_for_alice   # alice's history does not shrink bob's pool
 
 
 def test_history_window_is_smaller_than_the_phrase_pool():

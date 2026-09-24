@@ -5,6 +5,9 @@ from services.redis_client import get_redis
 
 PHRASE_HISTORY_SIZE = 10
 PHRASE_HISTORY_TTL_SECONDS = 7 * 24 * 60 * 60
+# The record of which phrases a user has already been given this cycle. It has to
+# outlive long gaps between logins, or waiting would reset the protection.
+PHRASE_USED_TTL_SECONDS = 365 * 24 * 60 * 60
 
 PHRASES = [
     "Hôm nay trời nắng đẹp và gió mát.",
@@ -124,19 +127,45 @@ def another_phrase(exclude: list[str]) -> str:
 
 
 async def next_verify_phrase(user_id: str) -> str:
-    """Pick a verify phrase the user hasn't been given in their last
-    PHRASE_HISTORY_SIZE attempts, so a recording of an earlier attempt
-    can't be replayed against a repeated challenge."""
+    """Pick a verify phrase this user has not been given yet in the current cycle.
+
+    A recording of an earlier challenge is genuine speech, so neither the speaker
+    match nor the anti-spoofing model can reject it; the only thing that stops it
+    being replayed is that the new challenge is a different sentence. Excluding
+    only the last few phrases (the first version) let a phrase come back after
+    about a dozen logins, which a test demonstrates. Now a phrase is not issued
+    again until the whole pool has been used once, so a captured recording only
+    becomes useful again after roughly PHRASES-many logins. When the pool runs
+    out a new cycle starts, but the last PHRASE_HISTORY_SIZE phrases are carried
+    over so none of them can come straight back.
+
+    This narrows the window a lot but does not close it: a phrase does eventually
+    recur, and word-level splicing from several recordings is not addressed by it.
+    """
     redis_client = get_redis()
-    key = f"phrase_history:{user_id}"
-    raw_history = await redis_client.lrange(key, 0, PHRASE_HISTORY_SIZE - 1)
+    history_key = f"phrase_history:{user_id}"
+    used_key = f"phrase_used:{user_id}"
+
+    raw_history = await redis_client.lrange(history_key, 0, PHRASE_HISTORY_SIZE - 1)
     history = [h.decode() for h in raw_history]
+    used = {m.decode() for m in await redis_client.smembers(used_key)}
 
-    phrase = another_phrase(history)
+    candidates = [p for p in PHRASES if p not in used]
+    if not candidates:
+        # pool exhausted: start over, keeping the most recent phrases off the table
+        await redis_client.delete(used_key)
+        used = set(history)
+        if used:
+            await redis_client.sadd(used_key, *used)
+        candidates = [p for p in PHRASES if p not in used]
 
-    await redis_client.lpush(key, phrase)
-    await redis_client.ltrim(key, 0, PHRASE_HISTORY_SIZE - 1)
-    await redis_client.expire(key, PHRASE_HISTORY_TTL_SECONDS)
+    phrase = random.choice(candidates)
+
+    await redis_client.sadd(used_key, phrase)
+    await redis_client.expire(used_key, PHRASE_USED_TTL_SECONDS)
+    await redis_client.lpush(history_key, phrase)
+    await redis_client.ltrim(history_key, 0, PHRASE_HISTORY_SIZE - 1)
+    await redis_client.expire(history_key, PHRASE_HISTORY_TTL_SECONDS)
     return phrase
 
 
