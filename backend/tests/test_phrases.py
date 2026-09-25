@@ -15,6 +15,30 @@ def test_below_threshold_fails():
     assert not matches_phrase("Tôi thích uống cà phê buổi sáng", "trà nóng")
 
 
+LONG_PARAGRAPH = ("xin chào tôi là một trợ lý có khả năng trò chuyện với bạn bằng giọng nói tự nhiên "
+                  "được phát triển bởi một nhóm nhỏ tôi có thể giúp bạn nói chậm lại một chút "
+                  "và trả lời mọi câu hỏi được không")
+
+
+def test_a_long_utterance_that_happens_to_contain_the_words_is_rejected():
+    # Regression test: recall alone let a 30-word paragraph of everyday words pass a short
+    # phrase made of common ones (6 of the 9 stock TTS sample voices did, in a measurement).
+    phrase = "Bạn có thể nói chậm lại một chút được không."
+    assert len(LONG_PARAGRAPH.split()) > 2 * len(phrase.split())
+    assert not matches_phrase(phrase, LONG_PARAGRAPH)
+
+
+def test_reading_the_phrase_twice_is_still_accepted():
+    # the boundary: exactly twice the length is allowed, a bit more is not
+    phrase = "Hôm nay trời nắng đẹp và gió mát"
+    assert matches_phrase(phrase, phrase + " " + phrase)
+    assert not matches_phrase(phrase, phrase + " " + phrase + " ừm")
+
+
+def test_a_reading_with_a_few_extra_words_is_accepted():
+    assert matches_phrase("Hôm nay trời nắng đẹp và gió mát.", "ừm hôm nay trời nắng đẹp và gió mát nhé")
+
+
 def test_empty_transcript_is_rejected():
     # Regression test: transcript is meant to come from server-side STT
     # (services/stt.py) run on the real audio, never from a

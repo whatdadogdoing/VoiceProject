@@ -92,10 +92,10 @@ PHRASES = [
     "Cơn nắng gắt buổi trưa khiến ai cũng mệt mỏi.",
     "Tôi vừa tải xong bộ phim yêu thích về máy.",
     "Chúng ta nên uống một ly nước ấm mỗi sáng.",
-    "Bạn có thể bật đèn giúp tôi được không.",
+    "Ông bà tôi thường trồng rau sau vườn nhà.",
     "Buổi biểu diễn âm nhạc tối nay rất đặc sắc.",
     "Tôi đang chuẩn bị hồ sơ xin việc mới.",
-    "Chúng tôi thường đi bộ quanh hồ vào mỗi buổi chiều.",
+    "Trường em có một sân bóng rộng và đẹp.",
     "Bạn nhớ kiểm tra lại vé trước khi lên tàu.",
     "Cơn bão vừa đi qua khiến nhiều cây đổ.",
     "Tôi thích trồng hoa trong khu vườn nhỏ của mình.",
@@ -126,9 +126,9 @@ PHRASES = [
     "Cả gia đình cùng đi dạo bên hồ.",
     "Chú tôi làm nghề lái xe đường dài.",
     "Cô ấy mặc chiếc áo dài màu xanh.",
-    "Tôi thường đọc sách trước khi đi ngủ.",
+    "Bác sĩ dặn tôi uống nhiều nước mỗi ngày.",
     "Con chó nhỏ nằm ngủ dưới gốc cây.",
-    "Buổi tối cả nhà quây quần bên bếp lửa.",
+    "Ánh trăng sáng soi rõ con đường làng.",
     "Anh trai tôi đang chuẩn bị đi làm.",
     "Bác nông dân ra đồng từ rất sớm.",
     "Hôm nay tôi được nghỉ nên ở nhà.",
@@ -179,7 +179,7 @@ PHRASES = [
     "Em tôi đang tập viết chữ đẹp.",
     "Người bạn thân luôn ở bên khi tôi buồn.",
     "Đêm qua tôi ngủ rất ngon giấc.",
-    "Chúng tôi cùng nhau dọn dẹp sân trường.",
+    "Chú chó nhỏ nằm ngủ ngoài sân nhà.",
     "Bác tài xế lái xe rất cẩn thận.",
     "Chiếc đồng hồ trên tường chạy rất đúng.",
     "Trẻ em thích chơi đùa trong công viên.",
@@ -189,14 +189,14 @@ PHRASES = [
     "Bà cụ chậm rãi đi qua con ngõ nhỏ.",
     "Chúng tôi chia nhau phần bánh còn lại.",
     "Tôi thấy rất vui khi được gặp lại bạn.",
-    "Cửa sổ phòng tôi hướng ra vườn cây.",
+    "Ngoài hiên mưa rơi tí tách suốt đêm qua.",
     "Cô giáo khen bạn ấy học rất chăm.",
     "Trái xoài chín vàng thơm cả gian bếp.",
     "Người thợ mộc đang làm một chiếc bàn.",
-    "Buổi trưa nắng gắt nên ai cũng nghỉ ngơi.",
+    "Người nông dân gặt lúa dưới nắng chiều.",
     "Tôi mong ngày mai trời sẽ đẹp.",
     "Mẹ đang gói bánh chưng cho ngày Tết.",
-    "Ông tôi đọc báo và uống trà mỗi sáng.",
+    "Bà cụ bán hàng rong quen mặt cả xóm.",
     "Chiếc thuyền nhỏ neo lại bên bến sông.",
     "Đàn trâu về chuồng khi trời sắp tối.",
     "Người ta cấy lúa vào đầu mùa mưa.",
@@ -213,6 +213,13 @@ PHRASES = [
 ]
 
 PHRASE_MATCH_THRESHOLD = 0.6
+# Recall of the expected words alone lets a long utterance through: a 30-word paragraph
+# of everyday speech contains most of the words of a short phrase made of common ones
+# (measured: 6 of the 9 stock TTS sample voices reached 0.6 against "Bạn có thể nói chậm
+# lại một chút được không."). What is heard therefore may not be much longer than what was asked
+# for. Genuine readings heard 1.00x the phrase at the median and 2.11x at the very most
+# (a speaker who also read out a number); the long paragraphs heard 24 words or more.
+PHRASE_MAX_LENGTH_RATIO = 2.0
 
 
 def random_phrases(count: int) -> list[str]:
@@ -278,8 +285,11 @@ def matches_phrase(expected: str, transcript: str) -> bool:
     run on the actual submitted audio -- never from a client-supplied field,
     which a caller could simply leave empty to skip this check entirely."""
     expected_words = _normalize_words(expected)
-    transcript_words = set(_normalize_words(transcript))
+    heard_words = _normalize_words(transcript)
     if not expected_words:
         return True
-    matched = sum(1 for w in expected_words if w in transcript_words)
+    if len(heard_words) > PHRASE_MAX_LENGTH_RATIO * len(expected_words):
+        return False
+    heard = set(heard_words)
+    matched = sum(1 for w in expected_words if w in heard)
     return (matched / len(expected_words)) >= PHRASE_MATCH_THRESHOLD

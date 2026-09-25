@@ -17,7 +17,7 @@ import unicodedata
 
 import pytest
 
-from services.phrases import PHRASES
+from services.phrases import PHRASE_MATCH_THRESHOLD, PHRASES, _normalize_words, matches_phrase
 
 MIN_POOL_SIZE = 200
 TONE_MARKS = {"̀", "́", "̃", "̉", "̣"}   # grave, acute, tilde, hook above, dot below
@@ -58,6 +58,22 @@ def test_the_pool_is_as_large_as_promised_and_has_no_duplicates():
 def test_no_phrase_has_a_loanword_a_digit_or_an_awkward_length():
     flagged = {p: _problems(p) for p in PHRASES if _problems(p)}
     assert not flagged, flagged
+
+
+def test_a_perfect_reading_of_one_phrase_never_passes_the_check_for_another():
+    """Recall of the expected words is all the phrase check measures, so two phrases that share most
+    of their words ("...chỉ đường giúp tôi..." / "...bật đèn giúp tôi...") let a recording of one
+    stand in for a challenge of the other, whatever the recognizer does. Found in the pool by
+    counting wrong-phrase pairs that passed at 0.6: 12 of 39,800 before this was fixed."""
+    # The same rule matches_phrase applies, with each phrase normalized once: 40,000 calls of
+    # matches_phrase itself take about 25 s.
+    words = {p: _normalize_words(p) for p in PHRASES}
+    heard = {p: set(w) for p, w in words.items()}
+    collisions = [(said, asked) for said in PHRASES for asked in PHRASES
+                  if said != asked
+                  and sum(w in heard[said] for w in words[asked]) / len(words[asked]) >= PHRASE_MATCH_THRESHOLD]
+    assert not collisions, collisions
+    assert matches_phrase(PHRASES[0], PHRASES[0])   # the shortcut agrees with the real matcher
 
 
 @pytest.mark.parametrize("word", ["podcast", "guitar", "email", "laptop", "camera", "wifi", "internet", "sofa", "micro"])
