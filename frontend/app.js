@@ -145,6 +145,9 @@ function wireMicMeter(selectEl, fillEl) {
 const recorder = new VoiceRecorder();
 const transcriber = new LiveTranscriber('vi-VN');
 let sessionToken = null;
+// The password-session token from login. sessionToken is swapped for the post-MFA
+// token while re-enrolling, so this is kept to switch back and to log out with.
+let loginSessionToken = null;
 
 let enrollPhrases = [];
 let enrollIndex = 0;
@@ -186,6 +189,7 @@ async function authenticate(endpoint, isRegister) {
     }
 
     sessionToken = data.session_token;
+    loginSessionToken = sessionToken;
     qs('app-header').hidden = false;
 
     const statusRes = await fetch('/api/voice-auth/status', { headers: authHeaders() });
@@ -336,6 +340,8 @@ qs('btn-enroll-confirm').onclick = async () => {
         if (isReenrolling) {
             // Already fully logged in for this session — no need to verify+OTP again.
             isReenrolling = false;
+            // back to the password session: the verify and OTP endpoints don't accept the JWT
+            sessionToken = loginSessionToken;
             setStatus(qs('status'), 'Cập nhật giọng nói thành công.', 'success');
             setTimeout(() => showStep('step-success'), 1000);
         } else {
@@ -723,13 +729,21 @@ qs('btn-reenroll').onclick = async () => {
 // ---------- Logout ----------
 
 qs('btn-logout-header').onclick = async () => {
-    // best-effort: invalidate the server-side session so a copied/leaked
-    // token can't keep being used after the user has explicitly logged out
-    if (sessionToken) {
-        fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+    // best-effort: invalidate the server-side session and revoke the post-MFA JWT
+    // so a copied/leaked token can't keep being used after the user has explicitly
+    // logged out. Both are sent because the session may have expired while the JWT
+    // (1 h against 30 min) is still alive, and the server finds the user from either.
+    const accessToken = localStorage.getItem('access_token');
+    const logoutToken = loginSessionToken || sessionToken;
+    if (logoutToken || accessToken) {
+        const headers = { 'X-Device-Id': getDeviceId() };
+        if (logoutToken) headers.Authorization = `Bearer ${logoutToken}`;
+        if (accessToken) headers['X-Access-Token'] = accessToken;
+        fetch('/api/auth/logout', { method: 'POST', headers }).catch(() => {});
     }
     localStorage.removeItem('access_token');
     sessionToken = null;
+    loginSessionToken = null;
     isReenrolling = false;
     clearInterval(otpInterval);
     recorder.closeMic();

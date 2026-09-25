@@ -26,21 +26,34 @@ def _load_secret() -> str:
 SECRET = _load_secret()
 
 
+ACCESS_TOKEN_LIFETIME = timedelta(hours=1)
+
+
 def create_access_token(user_id: str, auth_methods: list[str]) -> str:
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        # iat lets logout revoke every token issued before it (services/auth.py)
+        "iat": now,
+        "exp": now + ACCESS_TOKEN_LIFETIME,
         "auth_methods": auth_methods
     }
     return jwt.encode(payload, SECRET, algorithm="HS256")
 
 
-def decode_access_token(token: str) -> str:
-    """Raises jwt.PyJWTError (expired/malformed/bad signature) on failure."""
+def decode_access_token_with_iat(token: str) -> tuple[str, int]:
+    """Returns (user id, issued-at as epoch seconds). A token without iat, from
+    before the claim existed, counts as issued at 0, so any logout revokes it.
+    Raises jwt.PyJWTError (expired/malformed/bad signature) on failure."""
     payload = jwt.decode(token, SECRET, algorithms=["HS256"])
     methods = set(payload.get("auth_methods", []))
     # otp is mandatory; the other factor is either a successful voice verify,
     # or the email-recovery path used when voice stops working for the owner.
     if "otp" not in methods or not ({"voice", "recovery"} & methods):
         raise jwt.InvalidTokenError("token was not issued after a full auth flow")
-    return payload["sub"]
+    return payload["sub"], int(payload.get("iat", 0))
+
+
+def decode_access_token(token: str) -> str:
+    """Raises jwt.PyJWTError (expired/malformed/bad signature) on failure."""
+    return decode_access_token_with_iat(token)[0]

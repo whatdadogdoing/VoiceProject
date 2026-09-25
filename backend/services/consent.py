@@ -1,5 +1,8 @@
 from models.db import get_pool
 
+# The text users agree to is in frontend/index.html. Whenever it changes, bump this
+# (users then have to agree again) and add its hash in tests/test_consent_version.py,
+# which fails if the text and the version drift apart.
 CURRENT_CONSENT_VERSION = "1.0"
 
 

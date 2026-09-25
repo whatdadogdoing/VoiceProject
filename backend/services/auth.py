@@ -1,9 +1,10 @@
 import secrets
+import time
 import bcrypt
 import jwt
 from fastapi import Request, HTTPException
 from services.redis_client import get_redis
-from services.token import decode_access_token
+from services.token import ACCESS_TOKEN_LIFETIME, decode_access_token_with_iat
 from models.db import has_voiceprint
 
 SESSION_TTL_SECONDS = 1800
@@ -57,6 +58,47 @@ async def invalidate_session(token: str) -> None:
     await get_redis().delete(f"session:{token}")
 
 
+def _access_revoked_key(user_id: str) -> str:
+    return f"access_revoked_at:{user_id}"
+
+
+async def revoke_access_tokens(user_id: str) -> None:
+    """Invalidate every access token issued to this user up to now. A JWT can't be
+    looked up and deleted like a session, so logout records a cutoff time instead
+    and get_enroll_user_id refuses any token issued at or before it. The key only
+    has to outlive the longest-lived token, so it expires with them."""
+    await get_redis().setex(
+        _access_revoked_key(user_id), int(ACCESS_TOKEN_LIFETIME.total_seconds()), int(time.time())
+    )
+
+
+async def _access_token_revoked(user_id: str, issued_at: int) -> bool:
+    cutoff = await get_redis().get(_access_revoked_key(user_id))
+    return cutoff is not None and issued_at <= int(cutoff)
+
+
+async def end_login(tokens: list[str]) -> None:
+    """Logout. Each token may be the password-session token or the post-MFA JWT
+    (the client holds both, and swaps the JWT in while re-enrolling). The session
+    is deleted, and everything issued to the same user as a JWT is revoked, so a
+    copy of the JWT taken from the browser stops working too. The user is found
+    from whichever token still resolves: the 30-minute session may be gone while
+    the 1-hour JWT is alive."""
+    redis_client = get_redis()
+    user_ids = set()
+    for token in tokens:
+        user_id = await redis_client.get(f"session:{token}")
+        if user_id:
+            user_ids.add(user_id.decode())
+        await invalidate_session(token)
+        try:
+            user_ids.add(decode_access_token_with_iat(token)[0])
+        except jwt.PyJWTError:
+            pass
+    for user_id in user_ids:
+        await revoke_access_tokens(user_id)
+
+
 async def get_current_user_id(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -80,9 +122,13 @@ async def get_enroll_user_id(request: Request) -> str:
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
         try:
-            return decode_access_token(token)
+            user_id, issued_at = decode_access_token_with_iat(token)
         except jwt.PyJWTError:
             pass
+        else:
+            # a logged-out token is refused here and then fails the session lookup below
+            if not await _access_token_revoked(user_id, issued_at):
+                return user_id
 
     user_id = await get_current_user_id(request)
     if await has_voiceprint(user_id):

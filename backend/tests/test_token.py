@@ -6,7 +6,29 @@ from datetime import datetime, timedelta, timezone
 import jwt as pyjwt
 import pytest
 
-from services.token import SECRET, create_access_token, decode_access_token
+from services.token import SECRET, create_access_token, decode_access_token, decode_access_token_with_iat
+
+
+def test_the_token_records_when_it_was_issued():
+    # logout revokes by comparing this against a cutoff (see test_logout.py)
+    before = int(datetime.now(timezone.utc).timestamp())
+    token = create_access_token("user-1", ["voice", "otp"])
+    user_id, issued_at = decode_access_token_with_iat(token)
+    assert user_id == "user-1"
+    assert before <= issued_at <= before + 2
+
+
+def test_a_token_without_iat_counts_as_issued_at_zero():
+    legacy = pyjwt.encode(
+        {
+            "sub": "user-1",
+            "auth_methods": ["voice", "otp"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        },
+        SECRET,
+        algorithm="HS256",
+    )
+    assert decode_access_token_with_iat(legacy) == ("user-1", 0)
 
 
 def test_round_trip_voice_otp():

@@ -32,7 +32,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")],
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "X-Device-Id"],
+    allow_headers=["Authorization", "Content-Type", "X-Device-Id", "X-Access-Token"],
 )
 
 app.include_router(auth_router)

@@ -51,6 +51,12 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Sessions, OTPs, the enrollment state and the fraud lock live only here. The
+    # default (snapshot every hour if anything changed) can lose up to an hour of
+    # them on a crash, and a fraud lock that vanishes was meant to be permanent.
+    # The append-only file is flushed every second instead. If a redis_data volume
+    # from before this line exists, see "Redis persistence" in the README first.
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:

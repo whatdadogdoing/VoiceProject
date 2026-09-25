@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, EmailStr
 from models.db import create_user, get_user_by_email
 from services.auth import (
-    hash_password, verify_password, create_session, invalidate_session,
+    hash_password, verify_password, create_session, end_login,
     is_login_locked, record_login_failure, clear_login_failures,
     DUMMY_PASSWORD_HASH
 )
@@ -59,7 +59,13 @@ async def login(request: Request, body: LoginRequest):
 
 @router.post("/logout")
 async def logout(request: Request):
+    tokens = []
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        await invalidate_session(auth_header.removeprefix("Bearer ").strip())
+        tokens.append(auth_header.removeprefix("Bearer ").strip())
+    # the post-MFA JWT, when the client has one, so it is revoked along with the session
+    access_token = request.headers.get("X-Access-Token", "").strip()
+    if access_token:
+        tokens.append(access_token)
+    await end_login(tokens)
     return {"message": "Đã đăng xuất"}
