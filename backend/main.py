@@ -12,10 +12,12 @@ from services.anti_spoofing import load_model as load_antispoofing_model
 from services.speaker_verification import load_encoder as load_speaker_encoder
 from services.stt import load_models as load_speech_models
 from models.db import get_pool
+from models.migrate import describe as describe_migration, run as migrate_database
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print(describe_migration(*await migrate_database()), flush=True)
     await get_pool()
     load_antispoofing_model()
     load_speaker_encoder()

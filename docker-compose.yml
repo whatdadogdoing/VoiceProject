@@ -5,7 +5,7 @@ services:
       - "8000"
     env_file: .env
     environment:
-      # The speech models (Vosk 168 MB, Whisper 464 MB) live in the "models"
+      # The speech models (PhoWhisper-base 76 MB, Whisper small ~460 MB) live in the "models"
       # volume, not under ./backend: reading files this size through the
       # Windows -> VM bind mount hung the process in uninterruptible disk wait
       # several times. See services/stt.py.
@@ -19,14 +19,13 @@ services:
       - ./backend:/app
       - models:/opt/models
     healthcheck:
-      # The ASGI app can't accept any TCP connection at all until model
-      # loading (AASIST-L, Resemblyzer, Vosk) finishes inside the lifespan
-      # startup hook -- confirmed live that a request during that window gets
-      # an instant connection-refused, not a slow response. That makes /docs
-      # a reliable readiness probe: it only succeeds once startup is truly
-      # done. start_period is generous because cold start on this bind-mounted
-      # dev setup has been observed to take several minutes (Windows/WSL2
-      # bind-mount I/O for the Vosk model's many small files).
+      # The ASGI app can't accept any TCP connection at all until database
+      # setup and model loading (AASIST-L, Resemblyzer, Whisper) finish inside
+      # the lifespan startup hook -- confirmed live that a request during that
+      # window gets an instant connection-refused, not a slow response. That
+      # makes /docs a reliable readiness probe: it only succeeds once startup
+      # is truly done. start_period is generous because a first start downloads
+      # the Whisper models into the "models" volume and can take several minutes.
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs', timeout=3)"]
       interval: 10s
       timeout: 5s
@@ -40,8 +39,10 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: voiceauth
     volumes:
+      # Tables are not created here: the backend applies schema.sql and any pending
+      # migrations when it starts (backend/models/migrate.py), so a volume created
+      # by an older version of the project is upgraded too, not only an empty one.
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d voiceauth"]
       interval: 5s
