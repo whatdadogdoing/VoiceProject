@@ -42,7 +42,7 @@ function authHeaders() {
 }
 
 function normalizeWord(w) {
-    return w.toLowerCase().replace(/[.,!?;:"']/g, '');
+    return w.toLowerCase().replace(/[.,!?;:"'\-]/g, '');
 }
 
 function renderPhrase(containerEl, phrase) {
@@ -55,18 +55,66 @@ function renderPhrase(containerEl, phrase) {
     });
 }
 
+function renderCode(containerEl, code) {
+    containerEl.innerHTML = '';
+    if (!code) return [];
+    return code.split('').map((d) => {
+        const span = document.createElement('span');
+        span.textContent = d;
+        containerEl.appendChild(span);
+        return span;
+    });
+}
+
+// Highlights each expected word as it turns up in the live transcript (best-effort, client-side
+// only -- the server checks the actual uploaded audio). Returns whether the whole phrase has been
+// heard, and the recognized words that came after it, so a trailing code can be matched next
+// without the phrase's own words (e.g. a common "...được không" ending) being mistaken for digits.
 function highlightHeardWords(phrase, wordSpans, transcript) {
-    const targetWords = phrase.split(/\s+/);
+    const targetWords = phrase.split(/\s+/).map(normalizeWord);
     wordSpans.forEach((s) => s.classList.remove('heard'));
     const recWords = transcript.split(/\s+/).filter(Boolean).map(normalizeWord);
-    let ti = 0;
-    for (const rw of recWords) {
+    let ti = 0, matchedThrough = 0;
+    for (let ri = 0; ri < recWords.length; ri++) {
         if (ti >= targetWords.length) break;
-        if (normalizeWord(targetWords[ti]) === rw) {
+        if (targetWords[ti] === recWords[ri]) {
             wordSpans[ti].classList.add('heard');
             ti++;
+            matchedThrough = ri + 1;
         }
     }
+    const done = ti >= targetWords.length;
+    return { done, after: done ? recWords.slice(matchedThrough) : [] };
+}
+
+// Mirrors backend/services/verify_code.py's digit words, for this live (client-side only) hint.
+const DIGIT_WORDS = {
+    'không': '0', 'một': '1', 'hai': '2', 'ba': '3', 'bốn': '4',
+    'năm': '5', 'sáu': '6', 'bảy': '7', 'bẩy': '7', 'tám': '8', 'chín': '9',
+};
+
+function tokenDigits(word) {
+    if (/^\d+$/.test(word)) return word.split('');
+    return DIGIT_WORDS[word] ? [DIGIT_WORDS[word]] : [];
+}
+
+// Same idea as highlightHeardWords, over the recognized words that followed the phrase. A
+// recognized word can itself carry more than one digit ("4729"), so it can complete the code
+// mid-word. Returns whether every digit has now been heard.
+function highlightHeardCode(code, digitSpans, wordsAfterPhrase) {
+    digitSpans.forEach((s) => s.classList.remove('heard'));
+    let di = 0;
+    for (const w of wordsAfterPhrase) {
+        if (di >= code.length) break;
+        for (const d of tokenDigits(w)) {
+            if (di >= code.length) break;
+            if (d === code[di]) {
+                digitSpans[di].classList.add('heard');
+                di++;
+            }
+        }
+    }
+    return di >= code.length;
 }
 
 async function populateMicSelect(selectEl) {
@@ -111,6 +159,7 @@ let verifyBlob = null;
 let verifyTranscript = '';
 let verifyRecording = false;
 let verifyCode = null; // the random number to read after the phrase; null while the server has it switched off
+let verifyCodeSpans = [];
 
 // ---------- Auth ----------
 
@@ -304,11 +353,11 @@ qs('btn-enroll-confirm').onclick = async () => {
 
 // ---------- Verify ----------
 
-// Digits are spaced out so they are read one by one; the server checks them that way.
+// Each digit is its own span, like renderPhrase's words, so it can light up on its own once heard.
 function showVerifyCode(code) {
     verifyCode = code || null;
     qs('verify-code-wrap').hidden = !verifyCode;
-    qs('verify-code-box').textContent = verifyCode ? verifyCode.split('').join(' ') : '';
+    verifyCodeSpans = renderCode(qs('verify-code-box'), verifyCode);
     qs('verify-subtitle').textContent = verifyCode
         ? 'Hãy đọc to câu bên dưới, rồi đọc từng chữ số của mã, để xác thực.'
         : 'Hãy đọc to câu bên dưới để xác thực.';
@@ -368,10 +417,14 @@ async function startVerifyRecording() {
     verifyTranscript = '';
     transcriber.onTranscript = (t) => {
         verifyTranscript = t;
-        highlightHeardWords(verifyPhrase, verifyWordSpans, t);
-        // with a code the phrase is only the first half, so stopping here would cut the code off:
-        // the speaker presses "Xong" instead
-        if (!verifyCode && verifyWordSpans.length && verifyWordSpans.every((s) => s.classList.contains('heard'))) {
+        const { done, after } = highlightHeardWords(verifyPhrase, verifyWordSpans, t);
+        if (verifyCode) {
+            // the code only starts after the whole phrase has been heard, so its own words
+            // (a phrase can end in a digit word, e.g. "...được không") are never mistaken for digits
+            if (done && highlightHeardCode(verifyCode, verifyCodeSpans, after)) {
+                finishVerifyRecording();
+            }
+        } else if (done && verifyWordSpans.length) {
             stopVerifyRecording();
         }
     };
@@ -382,12 +435,13 @@ async function startVerifyRecording() {
     qs('verify-mic-select').disabled = true;
     qs('btn-verify-reshuffle').disabled = true;
     setStatus(qs('status-verify'), verifyCode
-        ? 'Đang ghi âm — đọc câu, rồi đọc từng chữ số của mã, xong nhấn "Xong"'
+        ? 'Đang ghi âm — đọc câu, rồi đọc từng chữ số của mã. Đọc xong sẽ tự động gửi.'
         : 'Đang ghi âm — đọc to câu ở trên', 'recording');
 }
 
-async function stopVerifyRecording() {
-    if (!verifyRecording) return;
+// Common to both ways a recording ends: stop listening, grab the audio, and leave the controls
+// in the "not recording" state. What happens next (show a preview, or send right away) differs.
+async function stopRecordingAndKeepBlob() {
     verifyRecording = false;
     transcriber.stop();
     const { blob } = await recorder.stopRecording();
@@ -396,10 +450,24 @@ async function stopVerifyRecording() {
     qs('btn-stop-verify').disabled = true;
     qs('verify-mic-select').disabled = false;
     qs('btn-verify-reshuffle').disabled = true;
+}
+
+async function stopVerifyRecording() {
+    if (!verifyRecording) return;
+    await stopRecordingAndKeepBlob();
     setStatus(qs('status-verify'), 'Nghe lại bên dưới trước khi gửi.');
     const audioEl = qs('verify-audio-preview');
     audioEl.src = URL.createObjectURL(verifyBlob);
     qs('verify-preview').style.display = 'block';
+}
+
+// Reading the code out is itself the "done" signal -- there is nothing left to check before
+// sending, so this skips the manual preview/confirm step stopVerifyRecording leads to.
+async function finishVerifyRecording() {
+    if (!verifyRecording) return;
+    await stopRecordingAndKeepBlob();
+    setStatus(qs('status-verify'), 'Đã đọc xong, đang gửi xác thực...', 'busy');
+    await submitVerify();
 }
 
 qs('btn-start-verify').onclick = startVerifyRecording;
@@ -412,10 +480,11 @@ qs('btn-verify-redo').onclick = () => {
     qs('btn-verify-reshuffle').disabled = false;
     qs('verify-preview').style.display = 'none';
     verifyWordSpans.forEach((s) => s.classList.remove('heard'));
+    verifyCodeSpans.forEach((s) => s.classList.remove('heard'));
     setStatus(qs('status-verify'), verifyReadyMessage());
 };
 
-qs('btn-verify-confirm').onclick = async () => {
+async function submitVerify() {
     const confirmBtn = qs('btn-verify-confirm');
     confirmBtn.disabled = true;
     confirmBtn.replaceChildren(document.createElement('span'));
@@ -453,7 +522,9 @@ qs('btn-verify-confirm').onclick = async () => {
             : 'Bạn có muốn đăng ký lại giọng nói không?';
         qs('verify-recovery').hidden = false;
     }
-};
+}
+
+qs('btn-verify-confirm').onclick = submitVerify;
 
 function verifyFailureMessage(data) {
     switch (data.reason) {

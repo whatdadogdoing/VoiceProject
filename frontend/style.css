@@ -192,8 +192,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
     padding: 8px 16px;
     font-size: 22px;
     font-weight: 600;
-    letter-spacing: 0.3em;
 }
+.code-box span { color: var(--text-faint); transition: color .15s; }
+.code-box span:not(:last-child) { margin-right: 0.5em; }
+.code-box span.heard { color: var(--text); }
 
 .hint { font-size: 11px; color: var(--text-faint); margin-bottom: 16px; }
 
