@@ -1,0 +1,60 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    # Postgres for tests/test_migrate.py (the tests that build a database the old way
+    # and the new way). The database name must end in _test; the test refuses others.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: voiceauth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d voiceauth_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      # The suite never loads a speech model: tests stub the recognizer and the
+      # speaker encoder. Installing resemblyzer would pull in torch (several GB),
+      # so those two are left out; every other pinned version comes from the same
+      # files the Docker image uses.
+      - name: Install dependencies
+        run: |
+          grep -v -E '^(resemblyzer|faster-whisper)' requirements.txt > "$RUNNER_TEMP/ci-requirements.txt"
+          grep -E '^pytest' requirements-dev.txt >> "$RUNNER_TEMP/ci-requirements.txt"
+          pip install -r "$RUNNER_TEMP/ci-requirements.txt"
+
+      - name: Run tests
+        env:
+          MIGRATION_TEST_DSN: postgresql://user:password@localhost:5432/voiceauth_test
+        run: python -m pytest -q -rs
