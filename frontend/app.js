@@ -110,6 +110,7 @@ let verifyWordSpans = [];
 let verifyBlob = null;
 let verifyTranscript = '';
 let verifyRecording = false;
+let verifyCode = null; // the random number to read after the phrase; null while the server has it switched off
 
 // ---------- Auth ----------
 
@@ -303,6 +304,22 @@ qs('btn-enroll-confirm').onclick = async () => {
 
 // ---------- Verify ----------
 
+// Digits are spaced out so they are read one by one; the server checks them that way.
+function showVerifyCode(code) {
+    verifyCode = code || null;
+    qs('verify-code-wrap').hidden = !verifyCode;
+    qs('verify-code-box').textContent = verifyCode ? verifyCode.split('').join(' ') : '';
+    qs('verify-subtitle').textContent = verifyCode
+        ? 'Hãy đọc to câu bên dưới, rồi đọc từng chữ số của mã, để xác thực.'
+        : 'Hãy đọc to câu bên dưới để xác thực.';
+}
+
+function verifyReadyMessage() {
+    return verifyCode
+        ? 'Nhấn "Bắt đầu nói", đọc to câu ở trên rồi đọc tiếp từng chữ số của mã.'
+        : 'Nhấn "Bắt đầu nói" rồi đọc to câu ở trên.';
+}
+
 async function startVerifyUI() {
     // mic setup and the network call are independent, so run them concurrently
     // instead of stacking their latency
@@ -317,13 +334,14 @@ async function startVerifyUI() {
     await micSetup;
     verifyPhrase = data.phrase;
     verifyWordSpans = renderPhrase(qs('verify-phrase-box'), verifyPhrase);
+    showVerifyCode(data.code);
     qs('verify-preview').style.display = 'none';
     qs('btn-start-verify').style.display = 'flex';
     qs('btn-start-verify').disabled = false;
     qs('btn-start-verify').replaceChildren(icon('mic'), document.createTextNode('Bắt đầu nói'));
     qs('btn-stop-verify').disabled = true;
     qs('btn-verify-reshuffle').disabled = false;
-    setStatus(qs('status-verify'), 'Nhấn "Bắt đầu nói" rồi đọc to câu ở trên.');
+    setStatus(qs('status-verify'), verifyReadyMessage());
 }
 
 // shown only once a verify attempt has actually failed; a fresh login starts clean
@@ -342,6 +360,7 @@ qs('btn-verify-reshuffle').onclick = async () => {
     const data = await res.json();
     verifyPhrase = data.phrase;
     verifyWordSpans = renderPhrase(qs('verify-phrase-box'), verifyPhrase);
+    showVerifyCode(data.code);
 };
 
 async function startVerifyRecording() {
@@ -350,7 +369,9 @@ async function startVerifyRecording() {
     transcriber.onTranscript = (t) => {
         verifyTranscript = t;
         highlightHeardWords(verifyPhrase, verifyWordSpans, t);
-        if (verifyWordSpans.length && verifyWordSpans.every((s) => s.classList.contains('heard'))) {
+        // with a code the phrase is only the first half, so stopping here would cut the code off:
+        // the speaker presses "Xong" instead
+        if (!verifyCode && verifyWordSpans.length && verifyWordSpans.every((s) => s.classList.contains('heard'))) {
             stopVerifyRecording();
         }
     };
@@ -360,7 +381,9 @@ async function startVerifyRecording() {
     qs('btn-stop-verify').disabled = false;
     qs('verify-mic-select').disabled = true;
     qs('btn-verify-reshuffle').disabled = true;
-    setStatus(qs('status-verify'), 'Đang ghi âm — đọc to câu ở trên', 'recording');
+    setStatus(qs('status-verify'), verifyCode
+        ? 'Đang ghi âm — đọc câu, rồi đọc từng chữ số của mã, xong nhấn "Xong"'
+        : 'Đang ghi âm — đọc to câu ở trên', 'recording');
 }
 
 async function stopVerifyRecording() {
@@ -389,7 +412,7 @@ qs('btn-verify-redo').onclick = () => {
     qs('btn-verify-reshuffle').disabled = false;
     qs('verify-preview').style.display = 'none';
     verifyWordSpans.forEach((s) => s.classList.remove('heard'));
-    setStatus(qs('status-verify'), 'Nhấn "Bắt đầu nói" rồi đọc to câu ở trên.');
+    setStatus(qs('status-verify'), verifyReadyMessage());
 };
 
 qs('btn-verify-confirm').onclick = async () => {
@@ -437,7 +460,9 @@ function verifyFailureMessage(data) {
         case 'audio_too_quiet':
             return 'Giọng bạn quá nhỏ, không thể xác định rõ. Hãy nói to và rõ hơn, rồi thử lại.';
         case 'phrase_mismatch':
-            return 'Câu đọc không khớp. Đây là câu mới, hãy thử lại.';
+            return verifyCode
+                ? 'Câu đọc hoặc mã không khớp. Đây là câu và mã mới, hãy thử lại.'
+                : 'Câu đọc không khớp. Đây là câu mới, hãy thử lại.';
         case 'voiceprint_mismatch':
             return 'Giọng nói không khớp với hồ sơ đã đăng ký. Đây là câu mới, hãy thử lại.';
         case 'suspicious_context':

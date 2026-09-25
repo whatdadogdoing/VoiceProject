@@ -12,6 +12,7 @@ import sys
 import types
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from services import risk_engine
@@ -44,7 +45,7 @@ def voice_auth(monkeypatch, fake_redis):
             EMBEDDING_DIM=2,   # matches the 2-number fake embeddings below
         ),
         "services.anti_spoofing": types.SimpleNamespace(analyze=lambda wav: 0.1),
-        "services.phrase_check": types.SimpleNamespace(check_phrase=lambda wav, phrase: True),
+        "services.phrase_check": types.SimpleNamespace(check_phrase=lambda wav, phrase, code=None: True),
         "services.audio": types.SimpleNamespace(to_wav_pcm16=lambda b: b, is_too_quiet=lambda wav: False),
         "services.otp": types.SimpleNamespace(send_otp=None, verify_otp=None),
         "services.rate_limiter": types.SimpleNamespace(limiter=_PassthroughLimiter()),
@@ -83,7 +84,7 @@ def voice_auth(monkeypatch, fake_redis):
     monkeypatch.setattr(module, "is_known_device", async_true)
     monkeypatch.setattr(module, "is_known_ip", async_true)
     monkeypatch.setattr(module, "evaluate", evaluate)
-    monkeypatch.setattr(module, "check_phrase", lambda wav, phrase: True)
+    monkeypatch.setattr(module, "check_phrase", lambda wav, phrase, code=None: True)
     monkeypatch.setattr(module, "verify_otp", async_true)
 
     yield module, calls
@@ -166,3 +167,106 @@ async def test_a_voiceprint_from_the_current_encoder_verifies_normally(voice_aut
     result = await _verify_with_score(module, monkeypatch, fake_redis, 0.9)
 
     assert result["decision"] == "mfa_required"
+
+
+# -- the random code read after the phrase (off unless VERIFY_CODE_ENABLED) ------------------------
+
+CODE = "3390"
+
+
+def _record_check_phrase(module, monkeypatch, passes=True):
+    seen = []
+
+    def check_phrase(wav, phrase, code=None):
+        seen.append((phrase, code))
+        return passes
+
+    monkeypatch.setattr(module, "check_phrase", check_phrase)
+    return seen
+
+
+async def _issue_phrase(module, monkeypatch):
+    async def phrase(user_id):
+        return PHRASE
+
+    monkeypatch.setattr(module, "next_verify_phrase", phrase)
+
+
+async def test_the_prompt_carries_no_code_while_the_switch_is_off(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+    monkeypatch.delenv("VERIFY_CODE_ENABLED", raising=False)
+    await _issue_phrase(module, monkeypatch)
+
+    challenge = await module.verify_prompt(request=_request(), user_id="u1")
+
+    assert challenge == {"phrase": PHRASE}
+    assert not await fake_redis.exists("verify_code:u1")
+
+
+async def test_the_prompt_issues_a_code_and_remembers_it_when_the_switch_is_on(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+    monkeypatch.setenv("VERIFY_CODE_ENABLED", "true")
+    await _issue_phrase(module, monkeypatch)
+
+    challenge = await module.verify_prompt(request=_request(), user_id="u1")
+
+    assert challenge["phrase"] == PHRASE
+    assert len(challenge["code"]) == 4 and challenge["code"].isdigit()
+    assert (await fake_redis.get("verify_code:u1")).decode() == challenge["code"]
+
+
+async def test_verify_checks_the_issued_code_and_uses_it_up(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+    monkeypatch.setenv("VERIFY_CODE_ENABLED", "true")
+    seen = _record_check_phrase(module, monkeypatch)
+    monkeypatch.setattr(module, "cosine_similarity", lambda a, b: 0.9)
+    await fake_redis.set("verify_phrase:u1", PHRASE)
+    await fake_redis.set("verify_code:u1", CODE)
+
+    result = await module.verify(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert seen == [(PHRASE, CODE)]
+    assert result["decision"] == "mfa_required"
+    assert not await fake_redis.exists("verify_code:u1")
+    assert not await fake_redis.exists("verify_phrase:u1")
+
+
+async def test_a_wrong_code_is_a_phrase_mismatch_and_still_uses_the_code_up(voice_auth, monkeypatch, fake_redis):
+    # one reason for both, so the answer does not tell a replaying attacker which half was wrong
+    module, calls = voice_auth
+    monkeypatch.setenv("VERIFY_CODE_ENABLED", "true")
+    _record_check_phrase(module, monkeypatch, passes=False)
+    await fake_redis.set("verify_phrase:u1", PHRASE)
+    await fake_redis.set("verify_code:u1", CODE)
+
+    result = await module.verify(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert result == {"decision": "rejected", "reason": "phrase_mismatch"}
+    assert calls.logged[0][4] == "phrase_mismatch"
+    assert not await fake_redis.exists("verify_code:u1")
+
+
+async def test_verify_needs_a_code_when_the_switch_is_on(voice_auth, monkeypatch, fake_redis):
+    # a prompt issued before the switch was turned on has no code: ask for a fresh one
+    module, calls = voice_auth
+    monkeypatch.setenv("VERIFY_CODE_ENABLED", "true")
+    seen = _record_check_phrase(module, monkeypatch)
+    await fake_redis.set("verify_phrase:u1", PHRASE)
+
+    with pytest.raises(HTTPException) as caught:
+        await module.verify(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert caught.value.status_code == 400
+    assert seen == []
+
+
+async def test_no_code_is_expected_while_the_switch_is_off(voice_auth, monkeypatch, fake_redis):
+    module, calls = voice_auth
+    monkeypatch.delenv("VERIFY_CODE_ENABLED", raising=False)
+    seen = _record_check_phrase(module, monkeypatch)
+    await fake_redis.set("verify_phrase:u1", PHRASE)
+    await fake_redis.set("verify_code:u1", CODE)   # left over from a prompt issued while it was on
+
+    await module.verify(request=_request(), user_id="u1", audio=_FakeUpload())
+
+    assert seen == [(PHRASE, None)]

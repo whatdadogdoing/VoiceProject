@@ -106,7 +106,7 @@
     <!-- Verify -->
     <div class="step" id="step-verify">
         <h1>Xác thực giọng nói</h1>
-        <p class="subtitle">Hãy đọc to câu bên dưới để xác thực.</p>
+        <p class="subtitle" id="verify-subtitle">Hãy đọc to câu bên dưới để xác thực.</p>
 
         <div class="mic-field">
             <label for="verify-mic-select">Micro</label>
@@ -119,6 +119,10 @@
             <button class="btn-icon-ghost" id="btn-verify-reshuffle" type="button" aria-label="Đổi câu khác" title="Đổi câu khác">
                 <svg class="icon"><use href="#icon-refresh"/></svg>
             </button>
+        </div>
+        <div class="code-wrap" id="verify-code-wrap" hidden>
+            <span class="code-label">Rồi đọc từng chữ số của mã:</span>
+            <span class="code-box" id="verify-code-box"></span>
         </div>
         <p class="hint">Từ sẽ sáng dần khi được nhận diện &mdash; cần trình duyệt hỗ trợ Web Speech API (Chrome/Edge).</p>
 

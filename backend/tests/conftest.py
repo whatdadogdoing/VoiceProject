@@ -7,6 +7,12 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-pytest-only")
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _code_switch_is_off_unless_a_test_turns_it_on(monkeypatch):
+    # VERIFY_CODE_ENABLED comes from the developer's .env; a test must not depend on it
+    monkeypatch.delenv("VERIFY_CODE_ENABLED", raising=False)
+
+
 class FakeRedis:
     """Minimal in-memory stand-in for redis.asyncio.Redis, covering only the
     methods the code under test actually calls. Not a general-purpose fake --

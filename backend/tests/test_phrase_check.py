@@ -92,6 +92,78 @@ def test_a_broken_second_recognizer_degrades_to_a_rejection_not_a_crash(check):
     assert module.check_phrase(b"wav", PHRASE) is False
 
 
+# A phrase followed by a random code, as PhoWhisper (digits spelled out) and Whisper small
+# (numerals) really transcribed a speaker reading them (the digit measurement, clip 4).
+CODE_PHRASE = "Anh trai tôi đang chuẩn bị đi làm."
+CODE = "3390"
+FAST_WITH_CODE = "anh trai tôi đang chuẩn bị đi làm ba ba chín không."
+ACCURATE_WITH_CODE = "Anh trai tôi đang chuẩn bị đi làm 3390"
+FAST_WRONG_CODE = "anh trai tôi đang chuẩn bị đi làm ba ba chín tám."
+
+
+def test_phrase_and_code_read_correctly_pass_on_the_fast_recognizer_alone(check):
+    module, use, calls = check
+    use(fast=FAST_WITH_CODE, accurate=OTHER_PHRASE_HEARD)
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is True
+    assert calls.accurate == 0
+
+
+def test_a_wrong_code_fails_even_when_the_phrase_is_right(check):
+    module, use, calls = check
+    use(fast=FAST_WRONG_CODE, accurate=FAST_WRONG_CODE)
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is False
+
+
+def test_a_missing_code_fails(check):
+    module, use, calls = check
+    use(fast="anh trai tôi đang chuẩn bị đi làm", accurate="Anh trai tôi đang chuẩn bị đi làm")
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is False
+
+
+def test_the_right_code_does_not_rescue_a_wrong_phrase(check):
+    module, use, calls = check
+    heard = "hôm nay trời nắng đẹp và gió mát ba ba chín không"
+    use(fast=heard, accurate=heard)
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is False
+
+
+def test_the_careful_recognizer_can_rescue_a_code_the_fast_one_misheard(check):
+    module, use, calls = check
+    use(fast=FAST_WRONG_CODE, accurate=ACCURATE_WITH_CODE)
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is True
+    assert calls.accurate == 1
+
+
+def test_phrase_and_code_must_come_from_the_same_recognizer(check):
+    # phrase right but code wrong on one, phrase mangled but code right on the other: neither
+    # transcript is a correct reading, so together they must not pass
+    module, use, calls = check
+    use(fast=FAST_WRONG_CODE, accurate="ừ ba ba chín không")
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is False
+
+
+def test_the_length_rule_still_applies_to_the_words_before_the_code(check):
+    module, use, calls = check
+    paragraph = ("xin chào tôi là một trợ lý anh trai có khả năng trò chuyện với bạn tôi đang bằng giọng nói "
+                 "tự nhiên chuẩn bị được phát triển bởi một nhóm nhỏ đi làm ba ba chín không")
+    use(fast=paragraph, accurate=paragraph)
+
+    assert module.check_phrase(b"wav", CODE_PHRASE, CODE) is False
+
+
+def test_without_a_code_digits_after_the_phrase_are_simply_extra_words(check):
+    module, use, calls = check
+    use(fast=FAST_WITH_CODE, accurate="")
+
+    assert module.check_phrase(b"wav", CODE_PHRASE) is True
+
+
 def test_what_each_recognizer_heard_is_logged_when_the_first_rejects(check, caplog):
     module, use, calls = check
     use(fast=FAST_MISHEARD, accurate=ACCURATE_HEARD)

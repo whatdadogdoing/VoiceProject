@@ -14,6 +14,7 @@ from services.rate_limiter import limiter
 from services.auth import get_current_user_id
 from services.redis_client import get_redis
 from services.phrases import next_verify_phrase
+from services import verify_code
 from models.db import (
     get_user_embedding, get_voiceprint_model_id, get_user_email, has_voiceprint, log_attempt,
     is_known_device, is_known_ip, update_voiceprint_embedding
@@ -61,7 +62,12 @@ async def revoke_consent_endpoint(request: Request, user_id: str = Depends(get_c
 async def verify_prompt(request: Request, user_id: str = Depends(get_current_user_id)):
     phrase = await next_verify_phrase(user_id)
     await get_redis().setex(f"verify_phrase:{user_id}", VERIFY_PHRASE_TTL_SECONDS, phrase)
-    return {"phrase": phrase}
+    challenge = {"phrase": phrase}
+    if verify_code.enabled():
+        code = verify_code.new_code()
+        await get_redis().setex(f"verify_code:{user_id}", VERIFY_PHRASE_TTL_SECONDS, code)
+        challenge["code"] = code
+    return challenge
 
 
 @router.post("/verify")
@@ -79,6 +85,15 @@ async def verify(
         raise HTTPException(400, "Chưa có câu để đọc, hãy gọi /verify/prompt trước")
     await get_redis().delete(f"verify_phrase:{user_id}")
     expected_phrase = expected_phrase_raw.decode()
+
+    # Read and deleted exactly like the phrase: a code is good for one attempt, right or wrong.
+    expected_code = None
+    if verify_code.enabled():
+        code_raw = await get_redis().get(f"verify_code:{user_id}")
+        await get_redis().delete(f"verify_code:{user_id}")
+        if not code_raw:
+            raise HTTPException(400, "Chưa có mã để đọc, hãy gọi /verify/prompt trước")
+        expected_code = code_raw.decode()
 
     audio_bytes = await audio.read()
     if len(audio_bytes) > 5 * 1024 * 1024:
@@ -112,7 +127,7 @@ async def verify(
         )
         return {"decision": "rejected", "reason": "audio_too_quiet"}
 
-    if not await asyncio.to_thread(check_phrase, wav_bytes, expected_phrase):
+    if not await asyncio.to_thread(check_phrase, wav_bytes, expected_phrase, expected_code):
         await log_attempt(
             user_id, None, None, "rejected", "phrase_mismatch",
             ip=client_ip, device=device_fp
