@@ -2,7 +2,7 @@ import os
 
 # services/token.py reads JWT_SECRET at import time, so this must be set
 # before any test module imports it.
-os.environ.setdefault("JWT_SECRET", "test-secret-for-pytest-only")
+os.environ.setdefault("JWT_SECRET", "test-secret-for-pytest-only-not-a-real-key")
 
 import pytest
 

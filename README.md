@@ -124,7 +124,7 @@ docker compose up -d
 
 Optional in `.env`: `VERIFY_CODE_ENABLED=true` adds a random 4-digit code to read after each challenge phrase (default `false`; see the Authentication Flow section, and the PhoWhisper step below, which it relies on).
 
-`JWT_SECRET` must be a real random value: the backend refuses to start if it is missing, still the `.env.example` placeholder, or shorter than 16 characters (`python -c "import secrets; print(secrets.token_urlsafe(48))"` makes a good one).
+`JWT_SECRET` must be a real random value: the backend refuses to start if it is missing, still the `.env.example` placeholder, or shorter than 32 bytes, the minimum RFC 7518 §3.2 sets for an HS256 key (`python -c "import secrets; print(secrets.token_urlsafe(48))"` makes a good one).
 
 There is no database step: the backend creates the tables itself when it starts (see the Database section below).
 

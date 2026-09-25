@@ -88,9 +88,21 @@ def test_refuses_to_start_with_the_placeholder_from_env_example(monkeypatch):
         _import_token_module(monkeypatch, "replace-with-a-random-secret")
 
 
-def test_refuses_to_start_with_a_very_short_secret(monkeypatch):
-    with pytest.raises(RuntimeError):
-        _import_token_module(monkeypatch, "short")
+@pytest.mark.parametrize("secret", ["short", "x" * 31, "é" * 15])   # the last is 15 characters, 30 bytes
+def test_refuses_to_start_with_a_secret_under_32_bytes(monkeypatch, secret):
+    # RFC 7518 section 3.2: an HS256 key is at least as long as the hash output
+    with pytest.raises(RuntimeError, match="32 bytes"):
+        _import_token_module(monkeypatch, secret)
+
+
+@pytest.mark.parametrize("secret", ["x" * 32, "é" * 16])   # the last is 16 characters but 32 bytes
+def test_a_secret_of_exactly_32_bytes_is_accepted(monkeypatch, secret):
+    assert _import_token_module(monkeypatch, secret).SECRET == secret
+
+
+def test_the_suggested_command_makes_a_secret_that_passes_the_guard(monkeypatch):
+    import secrets
+    _import_token_module(monkeypatch, secrets.token_urlsafe(48))
 
 
 def test_the_placeholder_in_env_example_matches_the_one_the_code_rejects():
