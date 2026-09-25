@@ -11,11 +11,13 @@ logger = logging.getLogger("uvicorn.error")
 def check_phrase(wav_bytes: bytes, expected_phrase: str) -> bool:
     """Did the speaker say `expected_phrase`, judged on the audio the server got?
 
-    The cheap recognizer (Whisper base, ~3s) goes first. When it agrees, that is
-    the answer. When it doesn't, the slower one (Whisper small, ~10s regardless
-    of clip length) gets a second listen: on recordings from the app's own
-    browser recorder, base passed about 4 in 5 attempts and small nearly all,
-    while the Vosk recognizer this replaced passed almost none. Both are held
+    The cheap recognizer (PhoWhisper-base, ~3s) goes first. When it agrees, that
+    is the answer. When it doesn't, the slower one (Whisper small, ~10s regardless
+    of clip length) gets a second listen. On recordings from the app's own
+    browser recorder PhoWhisper confirmed 19 of 19 where stock Whisper base,
+    which it replaced, confirmed 14 (and only 2 of 7 real submissions), so the
+    slow path (about 14 s in all) is now the exception. The Vosk recognizer
+    before that passed almost none. Both are held
     to the same word-match threshold, so the second opinion only rescues
     misheard genuine readings; a wrong phrase still fails both.
 
