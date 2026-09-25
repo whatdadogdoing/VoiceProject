@@ -10,6 +10,8 @@
 
 A voice-based authentication system combining **speaker verification**, **deepfake/anti-spoofing detection**, and **email OTP** as a second factor — plus a companion tool for red-teaming its own anti-spoofing defenses with a real voice-clone attack.
 
+A Word version of the technical documentation (features, data model, setup, measured results) is in [`VoiceProject_Documentation.docx`](VoiceProject_Documentation.docx).
+
 ---
 
 ## ✨ Features
