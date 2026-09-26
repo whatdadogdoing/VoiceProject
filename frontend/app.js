@@ -118,6 +118,9 @@ function highlightHeardCode(code, digitSpans, wordsAfterPhrase) {
 }
 
 async function populateMicSelect(selectEl) {
+    // the list is rebuilt after every rejected verify take, so the user's own choice has to be
+    // put back or the next take silently records from the default mic
+    const chosen = selectEl.value;
     selectEl.innerHTML = '<option value="">Mặc định</option>';
     try {
         const mics = await VoiceRecorder.listMicrophones();
@@ -130,6 +133,7 @@ async function populateMicSelect(selectEl) {
     } catch (e) {
         // mic permission denied or unavailable; keep default option only
     }
+    if (chosen && Array.from(selectEl.options || []).some((o) => o.value === chosen)) selectEl.value = chosen;
 }
 
 // opens the mic and starts the live level meter as soon as the step is shown,
@@ -140,6 +144,32 @@ function wireMicMeter(selectEl, fillEl) {
     });
     selectEl.onchange = open;
     return open;
+}
+
+const MIC_PROBLEM = 'Không mở được micro. Hãy kiểm tra micro đã cắm và bật chưa, hoặc chọn micro khác trong danh sách.';
+
+// Opens the mic for a screen. Resolves to '' when it opened and to MIC_PROBLEM when it did not,
+// and never rejects: a mic that won't open must not stop the screen from showing its phrase.
+// That used to leave the old phrase on screen after a rejected take while the server had already
+// moved on to a new one.
+function setUpMic(selectEl, fillEl) {
+    return populateMicSelect(selectEl)
+        .then(() => wireMicMeter(selectEl, fillEl)())
+        .then(() => '', () => MIC_PROBLEM);
+}
+
+// The mic can be gone by the time a take starts (unplugged, taken over by another app), and a
+// silent take is then the "not heard" the user sees. Try to reopen it once before recording.
+async function ensureMicOpen(selectEl, fillEl, statusEl) {
+    const live = recorder.stream && recorder.stream.getTracks().some((t) => t.readyState === 'live');
+    if (live) return true;
+    try {
+        await wireMicMeter(selectEl, fillEl)();
+        return true;
+    } catch (e) {
+        setStatus(statusEl, MIC_PROBLEM, 'error');
+        return false;
+    }
 }
 
 const recorder = new VoiceRecorder();
@@ -227,11 +257,10 @@ qs('btn-decline-consent').onclick = () => {
 async function startEnrollUI() {
     // mic setup and the network call are independent, so run them concurrently
     // instead of stacking their latency
-    const micSelect = qs('enroll-mic-select');
-    const micSetup = populateMicSelect(micSelect).then(() => wireMicMeter(micSelect, qs('enroll-mic-meter-fill'))());
+    const micSetup = setUpMic(qs('enroll-mic-select'), qs('enroll-mic-meter-fill'));
     const res = await fetch('/api/voice-auth/enroll/start', { method: 'POST', headers: authHeaders() });
     const data = await res.json();
-    await micSetup;
+    const micProblem = await micSetup;
     enrollPhrases = data.phrases;
     enrollIndex = 0;
     // how many samples enrollment needs is the server's decision, so the counter
@@ -241,6 +270,7 @@ async function startEnrollUI() {
         ...enrollPhrases.map(() => Object.assign(document.createElement('div'), { className: 'progress-seg' }))
     );
     showEnrollPhrase();
+    if (micProblem) setStatus(qs('status'), micProblem, 'error');
 }
 
 function showEnrollPhrase() {
@@ -257,15 +287,25 @@ function showEnrollPhrase() {
     });
 }
 
-qs('btn-enroll-reshuffle').onclick = async () => {
-    const res = await fetch('/api/voice-auth/enroll/reshuffle', { method: 'POST', headers: authHeaders() });
-    if (!res.ok) return;
+// Asks the server to swap the phrase for this sample (it keeps the phrase it expects per sample,
+// so the two must change together). Returns whether it did; on failure the old phrase stays valid.
+async function useAnotherEnrollPhrase() {
+    const res = await fetch('/api/voice-auth/enroll/reshuffle', { method: 'POST', headers: authHeaders() })
+        .catch(() => null);
+    if (!res || !res.ok) return false;
     const data = await res.json();
     enrollPhrases[enrollIndex] = data.phrase;
-    enrollWordSpans = renderPhrase(qs('enroll-phrase-box'), data.phrase);
+    return true;
+}
+
+qs('btn-enroll-reshuffle').onclick = async () => {
+    if (await useAnotherEnrollPhrase()) {
+        enrollWordSpans = renderPhrase(qs('enroll-phrase-box'), enrollPhrases[enrollIndex]);
+    }
 };
 
 async function startEnrollRecording() {
+    if (!(await ensureMicOpen(qs('enroll-mic-select'), qs('enroll-mic-meter-fill'), qs('status')))) return;
     enrollRecording = true;
     enrollTranscript = '';
     qs('btn-record-sample').replaceChildren(document.createTextNode('Dừng ghi âm'));
@@ -318,18 +358,31 @@ qs('btn-enroll-confirm').onclick = async () => {
     // speech-to-text on the uploaded audio to check the phrase was read.
     const formData = new FormData();
     formData.append('audio', enrollBlob, 'sample.webm');
-    const res = await fetch('/api/voice-auth/enroll/sample', { method: 'POST', headers: authHeaders(), body: formData });
-    const data = await res.json();
+    const res = await fetch('/api/voice-auth/enroll/sample', { method: 'POST', headers: authHeaders(), body: formData })
+        .catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
     confirmBtn.disabled = false;
     confirmBtn.textContent = 'Xác nhận';
 
-    // Both mean "this take wasn't accepted, record the same phrase again" --
-    // neither may fall through to the else branch below, which advances to the
-    // next phrase as if the sample had been stored.
+    // Nothing was stored: unreadable audio, too many suspected samples, an enrollment that has
+    // expired, no connection. Anything without a status used to fall through to the last branch
+    // below and move on to the next phrase as if the sample had been saved, leaving the screen one
+    // sample ahead of the server, which then judged every take against the phrase the screen had left.
+    if (!res || !res.ok) {
+        enrollBlob = null;
+        showEnrollPhrase();
+        setStatus(qs('status'), data.detail || 'Không gửi được mẫu, hãy ghi âm lại.', 'error');
+        return;
+    }
+
+    // Both mean "this take wasn't accepted": start it over from a clean screen with a new phrase
+    // (the same one if the server can't swap it), and "Đổi câu" usable again. Neither may fall
+    // through to the last branch, which advances as if the sample had been stored.
     if (data.status === 'phrase_mismatch' || data.status === 'spoof_detected') {
-        qs('enroll-preview').style.display = 'none';
-        qs('btn-record-sample').style.display = 'flex';
-        setStatus(qs('status'), data.message, 'error');
+        const swapped = await useAnotherEnrollPhrase();
+        enrollBlob = null;
+        showEnrollPhrase();
+        setStatus(qs('status'), swapped ? `${data.message}. Đã đổi sang câu mới.` : data.message, 'error');
         return;
     }
 
@@ -351,9 +404,13 @@ qs('btn-enroll-confirm').onclick = async () => {
                 showStep('step-verify');
             }, 1000);
         }
-    } else {
+    } else if (data.status === 'enrolling') {
         enrollIndex++;
         showEnrollPhrase();
+    } else {
+        enrollBlob = null;
+        showEnrollPhrase();
+        setStatus(qs('status'), 'Máy chủ trả lời không như mong đợi, hãy ghi âm lại.', 'error');
     }
 };
 
@@ -375,18 +432,8 @@ function verifyReadyMessage() {
         : 'Nhấn "Bắt đầu nói" rồi đọc to câu ở trên.';
 }
 
-async function startVerifyUI() {
-    // mic setup and the network call are independent, so run them concurrently
-    // instead of stacking their latency
-    const micSelect = qs('verify-mic-select');
-    const micSetup = populateMicSelect(micSelect).then(() => wireMicMeter(micSelect, qs('verify-mic-meter-fill'))());
-    const res = await fetch('/api/voice-auth/verify/prompt', { method: 'POST', headers: authHeaders() });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Không lấy được câu xác thực.');
-    }
-    const data = await res.json();
-    await micSetup;
+// Puts a phrase (and code) from /verify/prompt on the screen, ready for a new take.
+function showVerifyPrompt(data) {
     verifyPhrase = data.phrase;
     verifyWordSpans = renderPhrase(qs('verify-phrase-box'), verifyPhrase);
     showVerifyCode(data.code);
@@ -397,6 +444,40 @@ async function startVerifyUI() {
     qs('btn-stop-verify').disabled = true;
     qs('btn-verify-reshuffle').disabled = false;
     setStatus(qs('status-verify'), verifyReadyMessage());
+}
+
+// After a rejected take the server has already thrown the phrase away. If no new one can be
+// fetched, the one still on screen can never be accepted, so take it down and leave only the
+// button that asks for another.
+function showNoVerifyPhrase() {
+    verifyPhrase = '';
+    verifyWordSpans = [];
+    verifyCodeSpans = [];
+    qs('verify-phrase-box').textContent = '';
+    qs('verify-code-wrap').hidden = true;
+    qs('verify-preview').style.display = 'none';
+    qs('btn-start-verify').style.display = 'flex';
+    qs('btn-start-verify').disabled = true;
+    qs('btn-stop-verify').disabled = true;
+    qs('btn-verify-reshuffle').disabled = false;
+}
+
+// Rejects if there is no new phrase; otherwise resolves to '' or, when the mic would not open,
+// to MIC_PROBLEM (the phrase is still shown, so the user can pick another mic and go on).
+async function startVerifyUI() {
+    // mic setup and the network call are independent, so run them concurrently
+    // instead of stacking their latency
+    const micSetup = setUpMic(qs('verify-mic-select'), qs('verify-mic-meter-fill'));
+    const res = await fetch('/api/voice-auth/verify/prompt', { method: 'POST', headers: authHeaders() });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Không lấy được câu xác thực.');
+    }
+    const data = await res.json();
+    const micProblem = await micSetup;
+    showVerifyPrompt(data);
+    if (micProblem) setStatus(qs('status-verify'), micProblem, 'error');
+    return micProblem;
 }
 
 // shown only once a verify attempt has actually failed; a fresh login starts clean
@@ -410,15 +491,17 @@ function resetVerifyRecoveryPrompt() {
 }
 
 qs('btn-verify-reshuffle').onclick = async () => {
-    const res = await fetch('/api/voice-auth/verify/prompt', { method: 'POST', headers: authHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    verifyPhrase = data.phrase;
-    verifyWordSpans = renderPhrase(qs('verify-phrase-box'), verifyPhrase);
-    showVerifyCode(data.code);
+    const res = await fetch('/api/voice-auth/verify/prompt', { method: 'POST', headers: authHeaders() })
+        .catch(() => null);
+    if (!res || !res.ok) {
+        setStatus(qs('status-verify'), 'Không lấy được câu mới, hãy thử lại sau ít giây.', 'error');
+        return;
+    }
+    showVerifyPrompt(await res.json());
 };
 
 async function startVerifyRecording() {
+    if (!(await ensureMicOpen(qs('verify-mic-select'), qs('verify-mic-meter-fill'), qs('status-verify')))) return;
     verifyRecording = true;
     verifyTranscript = '';
     transcriber.onTranscript = (t) => {
@@ -502,8 +585,11 @@ async function submitVerify() {
     // of trusting a client-supplied transcript.
     const formData = new FormData();
     formData.append('audio', verifyBlob, 'voice.webm');
-    const res = await fetch('/api/voice-auth/verify', { method: 'POST', headers: authHeaders(), body: formData });
-    const data = await res.json();
+    const res = await fetch('/api/voice-auth/verify', { method: 'POST', headers: authHeaders(), body: formData })
+        .catch(() => null);
+    // an HTML error page from nginx or no answer at all is a failed attempt like any other,
+    // not an exception that leaves this screen half-way through a take
+    const data = res ? await res.json().catch(() => ({})) : {};
     confirmBtn.disabled = false;
     confirmBtn.textContent = 'Gửi xác thực';
 
@@ -517,8 +603,23 @@ async function submitVerify() {
         sendOtp('/api/voice-auth/otp/send');
     } else {
         verifyBlob = null;
-        await startVerifyUI();
-        setStatus(qs('status-verify'), verifyFailureMessage(data), 'error');
+        // The server used up the phrase when it judged this take, and with no answer at all we
+        // can't tell whether it did, so a new one is fetched straight away either way.
+        let freshPhrase = true;
+        let micProblem = '';
+        try {
+            micProblem = await startVerifyUI();
+        } catch (err) {
+            freshPhrase = false;
+            showNoVerifyPhrase();
+        }
+        setStatus(
+            qs('status-verify'),
+            verifyFailureMessage(data, freshPhrase)
+                + (freshPhrase ? '' : ' Chưa lấy được câu mới, hãy nhấn nút "Đổi câu khác" cạnh câu.')
+                + (micProblem ? ` ${micProblem}` : ''),
+            'error'
+        );
         recoveryPurpose = data.reason === 'fraud_lockout' ? 'unlock' : 'reenroll';
         qs('verify-recovery-hint').textContent = recoveryPurpose === 'unlock'
             ? 'Tài khoản đã bị khoá do nghi ngờ tấn công.'
@@ -532,18 +633,21 @@ async function submitVerify() {
 
 qs('btn-verify-confirm').onclick = submitVerify;
 
-function verifyFailureMessage(data) {
+// newPhrase: whether a new phrase (and code) is on screen. Every rejected take gets one, so the
+// message says so, unless fetching it failed.
+function verifyFailureMessage(data, newPhrase = true) {
+    const again = newPhrase ? 'Đây là câu mới, hãy thử lại.' : 'Hãy thử lại.';
     switch (data.reason) {
         case 'audio_too_quiet':
-            return 'Giọng bạn quá nhỏ, không thể xác định rõ. Hãy nói to và rõ hơn, rồi thử lại.';
+            return `Giọng bạn quá nhỏ hoặc micro không thu được tiếng. Hãy kiểm tra micro, nói to và rõ hơn. ${again}`;
         case 'phrase_mismatch':
             return verifyCode
-                ? 'Câu đọc hoặc mã không khớp. Đây là câu và mã mới, hãy thử lại.'
-                : 'Câu đọc không khớp. Đây là câu mới, hãy thử lại.';
+                ? `Câu đọc hoặc mã không khớp. ${newPhrase ? 'Đây là câu và mã mới, hãy thử lại.' : 'Hãy thử lại.'}`
+                : `Câu đọc không khớp. ${again}`;
         case 'voiceprint_mismatch':
-            return 'Giọng nói không khớp với hồ sơ đã đăng ký. Đây là câu mới, hãy thử lại.';
+            return `Giọng nói không khớp với hồ sơ đã đăng ký. ${again}`;
         case 'suspicious_context':
-            return 'Phát hiện dấu hiệu bất thường (thiết bị hoặc vị trí lạ). Hãy thử lại để xác minh thêm.';
+            return `Phát hiện dấu hiệu bất thường (thiết bị hoặc vị trí lạ). ${newPhrase ? 'Đây là câu mới, hãy thử lại' : 'Hãy thử lại'} để xác minh thêm.`;
         case 'spoofing_detected':
             return `Bạn có đang dùng bản ghi âm hoặc giọng giả không? Nếu bạn cố tình dùng cách này để vượt qua xác thực, hệ thống sẽ xử lý nghiêm túc. Còn ${data.tries_left} lần thử.`;
         case 'fraud_lockout':
@@ -553,7 +657,7 @@ function verifyFailureMessage(data) {
         case 'voiceprint_outdated':
             return 'Hồ sơ giọng nói của bạn được tạo bằng một phiên bản cũ của hệ thống nên không thể dùng nữa. Hãy đăng ký lại giọng nói bằng nút bên dưới.';
         default:
-            return 'Xác thực thất bại. Đây là câu mới, hãy thử lại.';
+            return `Xác thực thất bại. ${again}`;
     }
 }
 
