@@ -52,8 +52,3 @@ def decode_access_token_with_iat(token: str) -> tuple[str, int]:
     if "otp" not in methods or not ({"voice", "recovery"} & methods):
         raise jwt.InvalidTokenError("token was not issued after a full auth flow")
     return payload["sub"], int(payload.get("iat", 0))
-
-
-def decode_access_token(token: str) -> str:
-    """Raises jwt.PyJWTError (expired/malformed/bad signature) on failure."""
-    return decode_access_token_with_iat(token)[0]

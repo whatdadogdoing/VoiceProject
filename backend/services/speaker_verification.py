@@ -10,6 +10,8 @@ os.environ.setdefault("NUMBA_THREADING_LAYER", "workqueue")
 import numpy as np
 from resemblyzer import VoiceEncoder, preprocess_wav
 
+from services.audio import wav_to_float32
+
 # The voiceprint is the average of this many samples. Each challenge phrase gives
 # only 2-4 s of speech, so a single embedding is noisy; simulating templates of
 # k in-app takes tested on the rest, the share of genuine takes falling under the
@@ -51,16 +53,9 @@ def _silence_wav_bytes(seconds: float = 1.0, sr: int = 16000) -> bytes:
     return buf.getvalue()
 
 
-def _wav_to_float32(wav_bytes: bytes) -> np.ndarray:
-    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        raw = wf.readframes(wf.getnframes())
-    pcm16 = np.frombuffer(raw, dtype=np.int16)
-    return pcm16.astype(np.float32) / 32768.0
-
-
 def embed(wav_bytes: bytes) -> list[float]:
     load_encoder()
-    wav = preprocess_wav(_wav_to_float32(wav_bytes), source_sr=16000)
+    wav = preprocess_wav(wav_to_float32(wav_bytes), source_sr=16000)
     return _encoder.embed_utterance(wav).tolist()
 
 

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import jwt as pyjwt
 import pytest
 
-from services.token import SECRET, create_access_token, decode_access_token, decode_access_token_with_iat
+from services.token import SECRET, create_access_token, decode_access_token_with_iat
 
 
 def test_the_token_records_when_it_was_issued():
@@ -33,12 +33,12 @@ def test_a_token_without_iat_counts_as_issued_at_zero():
 
 def test_round_trip_voice_otp():
     token = create_access_token("user-123", ["voice", "otp"])
-    assert decode_access_token(token) == "user-123"
+    assert decode_access_token_with_iat(token)[0] == "user-123"
 
 
 def test_round_trip_recovery_otp():
     token = create_access_token("user-456", ["recovery", "otp"])
-    assert decode_access_token(token) == "user-456"
+    assert decode_access_token_with_iat(token)[0] == "user-456"
 
 
 def test_rejects_voice_without_otp():
@@ -46,13 +46,13 @@ def test_rejects_voice_without_otp():
     # usable access token.
     token = create_access_token("user-789", ["voice"])
     with pytest.raises(pyjwt.PyJWTError):
-        decode_access_token(token)
+        decode_access_token_with_iat(token)
 
 
 def test_rejects_otp_without_voice_or_recovery():
     token = create_access_token("user-000", ["otp"])
     with pytest.raises(pyjwt.PyJWTError):
-        decode_access_token(token)
+        decode_access_token_with_iat(token)
 
 
 def test_rejects_bad_signature():
@@ -66,7 +66,7 @@ def test_rejects_bad_signature():
         algorithm="HS256",
     )
     with pytest.raises(pyjwt.PyJWTError):
-        decode_access_token(forged)
+        decode_access_token_with_iat(forged)
 
 
 def test_rejects_expired_token():
@@ -80,7 +80,7 @@ def test_rejects_expired_token():
         algorithm="HS256",
     )
     with pytest.raises(pyjwt.PyJWTError):
-        decode_access_token(expired)
+        decode_access_token_with_iat(expired)
 
 
 def _import_token_module(monkeypatch, secret):

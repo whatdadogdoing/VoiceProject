@@ -1,9 +1,9 @@
-import io
 import logging
 import os
-import wave
 
 import numpy as np
+
+from services.audio import wav_to_float32
 
 # uvicorn configures this logger at INFO; a module-level logging.getLogger(__name__)
 # would silently drop these lines.
@@ -83,9 +83,7 @@ def load_models() -> None:
 
 def _transcribe(tier: str, wav_bytes: bytes) -> str:
     model = _load(tier)
-    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        pcm16 = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-    audio = pcm16.astype(np.float32) / 32768.0
+    audio = wav_to_float32(wav_bytes)
     segments, _ = model.transcribe(
         audio, language="vi", beam_size=_TIERS[tier]["beam"], condition_on_previous_text=False,
         temperature=0.0, without_timestamps=True,

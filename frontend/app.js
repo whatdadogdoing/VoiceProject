@@ -20,6 +20,12 @@ function setStatus(target, text, type = 'idle') {
     target.appendChild(Object.assign(document.createElement('span'), { textContent: text }));
 }
 
+function setButtonBusy(btn, text) {
+    btn.disabled = true;
+    btn.replaceChildren(Object.assign(document.createElement('span'), { className: 'spinner' }));
+    btn.appendChild(document.createTextNode(text));
+}
+
 function showStep(id) {
     document.querySelectorAll('.step').forEach((s) => s.classList.remove('active'));
     qs(id).classList.add('active');
@@ -363,10 +369,7 @@ qs('btn-enroll-redo').onclick = () => {
 
 qs('btn-enroll-confirm').onclick = async () => {
     const confirmBtn = qs('btn-enroll-confirm');
-    confirmBtn.disabled = true;
-    confirmBtn.replaceChildren(document.createElement('span'));
-    confirmBtn.firstChild.className = 'spinner';
-    confirmBtn.appendChild(document.createTextNode('Đang xử lý...'));
+    setButtonBusy(confirmBtn, 'Đang xử lý...');
 
     // enrollTranscript (from the browser's own Web Speech API, when available)
     // is only used locally to highlight heard words live -- the server no
@@ -591,10 +594,7 @@ qs('btn-verify-redo').onclick = () => {
 
 async function submitVerify() {
     const confirmBtn = qs('btn-verify-confirm');
-    confirmBtn.disabled = true;
-    confirmBtn.replaceChildren(document.createElement('span'));
-    confirmBtn.firstChild.className = 'spinner';
-    confirmBtn.appendChild(document.createTextNode('Đang xác thực...'));
+    setButtonBusy(confirmBtn, 'Đang xác thực...');
 
     // verifyTranscript is only used locally to highlight heard words live --
     // the server runs its own speech-to-text on the uploaded audio instead

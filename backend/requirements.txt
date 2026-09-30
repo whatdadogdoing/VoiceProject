@@ -4,7 +4,6 @@ uvicorn[standard]==0.32.0
 python-multipart==0.0.31
 numpy==2.4.6
 asyncpg==0.30.0
-python-dotenv==1.2.2
 fastapi-mail==1.4.1
 redis==5.0.8
 slowapi==0.1.9

@@ -1,6 +1,5 @@
 # secrets
 .env
-security-tests/.env
 
 # python
 __pycache__/
@@ -8,8 +7,6 @@ __pycache__/
 
 # downloaded/generated at runtime - not source
 fake-voice-lab/data/
-security-tests/reference/
-security-tests/output/
 backend/services/weights/vosk-model-small-vn-0.4/
 backend/services/weights/faster-whisper-small/
 backend/services/weights/vosk-model-vn-0.4/

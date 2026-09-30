@@ -1,9 +1,9 @@
-import io
 import os
-import wave
 
 import numpy as np
 import onnxruntime as ort
+
+from services.audio import wav_to_float32
 
 _MODEL_PATH = os.path.join(os.path.dirname(__file__), "weights", "aasist_l.onnx")
 _NB_SAMP = 64600  # fixed input length the pretrained weights were trained on (~4.04s @ 16kHz)
@@ -84,17 +84,10 @@ def _pad(x: np.ndarray, max_len: int = _NB_SAMP) -> np.ndarray:
     return np.tile(x, num_repeats)[:max_len]
 
 
-def _wav_to_float32(wav_bytes: bytes) -> np.ndarray:
-    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        raw = wf.readframes(wf.getnframes())
-    pcm16 = np.frombuffer(raw, dtype=np.int16)
-    return pcm16.astype(np.float32) / 32768.0
-
-
 def analyze(wav_bytes: bytes) -> float:
     load_model()
 
-    x = _pad(_normalize_level(_wav_to_float32(wav_bytes)))[np.newaxis, :]  # (1, NB_SAMP)
+    x = _pad(_normalize_level(wav_to_float32(wav_bytes)))[np.newaxis, :]  # (1, NB_SAMP)
     logits = _session.run(["logits"], {"waveform": x})[0]
 
     # trained with label 0=spoof, 1=bonafide (AASIST/ASVspoof2019 convention)

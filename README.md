@@ -114,7 +114,6 @@ The interactive version (`assets/architecture-diagram.html`, open it locally) ha
 | `backend/services/verify_code.py` | the optional random 4-digit code read after the phrase: the `VERIFY_CODE_ENABLED` switch, the generator, and splitting a transcript into phrase and code |
 | `frontend/` | nginx + vanilla HTML/CSS/JS, reverse-proxies `/api/*` |
 | `fake-voice-lab/` | standalone voice-clone attack tool (own Dockerfile, own port) |
-| `security-tests/` | earlier CLI prototype, superseded by `fake-voice-lab` |
 
 ---
 

@@ -19,6 +19,13 @@ def to_wav_pcm16(audio_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+def wav_to_float32(wav_bytes: bytes) -> np.ndarray:
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+        raw = wf.readframes(wf.getnframes())
+    pcm16 = np.frombuffer(raw, dtype=np.int16)
+    return pcm16.astype(np.float32) / 32768.0
+
+
 def _rms_dbfs(wav_bytes: bytes) -> float:
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
         raw = wf.readframes(wf.getnframes())
