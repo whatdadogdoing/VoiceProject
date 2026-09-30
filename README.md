@@ -94,16 +94,7 @@ The same recovery endpoints (password + email OTP, no voice needed) also cover a
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Browser(["Browser"]) -->|":3000"| FE["frontend/<br/>nginx + static JS"]
-    FE -->|"/api/* proxy"| BE["backend/<br/>FastAPI"]
-    BE --> PG[("Postgres<br/>users · voiceprints · attempts")]
-    BE --> RD[("Redis<br/>sessions · OTP · fraud locks")]
-    FVL["fake-voice-lab/<br/>standalone tool · :5001"] -.->|"server-to-server<br/>(no CORS involved)"| BE
-```
-
-The same architecture, generated from the real files (`docker-compose.yml`, `frontend/nginx.conf`, `backend/schema.sql`, `backend/services/redis_client.py`) with [Archify](https://github.com/tt-a1i/archify), each box citing exactly where it came from:
+Generated from the real files (`docker-compose.yml`, `frontend/nginx.conf`, `backend/schema.sql`, `backend/services/redis_client.py`) with [Archify](https://github.com/tt-a1i/archify), each box citing exactly where it came from:
 
 ![VoiceProject architecture diagram](assets/architecture-diagram.png)
 
