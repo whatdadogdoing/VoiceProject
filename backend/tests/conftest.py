@@ -23,6 +23,13 @@ class FakeRedis:
         self._store: dict[str, str] = {}
         self._lists: dict[str, list[str]] = {}
         self._sets: dict[str, set[str]] = {}
+        # Only recorded, never counted down or expired -- for tests that need to
+        # assert a TTL was set at all (e.g. "the first failure starts the
+        # window"), not simulate real expiry.
+        self._ttls: dict[str, int] = {}
+
+    def ttl_of(self, key):
+        return self._ttls.get(key)
 
     async def get(self, key):
         val = self._store.get(key)
@@ -33,11 +40,13 @@ class FakeRedis:
 
     async def setex(self, key, ttl, value):
         self._store[key] = str(value)
+        self._ttls[key] = ttl
 
     async def delete(self, key):
         self._store.pop(key, None)
         self._lists.pop(key, None)
         self._sets.pop(key, None)
+        self._ttls.pop(key, None)
 
     async def exists(self, key):
         return 1 if key in self._store or key in self._lists or key in self._sets else 0
@@ -54,7 +63,7 @@ class FakeRedis:
         return current
 
     async def expire(self, key, ttl):
-        pass
+        self._ttls[key] = ttl
 
     async def lpush(self, key, value):
         self._lists.setdefault(key, []).insert(0, str(value))

@@ -240,6 +240,22 @@ async function authenticate(endpoint, isRegister) {
 qs('btn-login').onclick = () => authenticate('/api/auth/login', false);
 qs('btn-register').onclick = () => authenticate('/api/auth/register', true);
 
+// ---------- Show/hide password ----------
+
+(() => {
+    const input = qs('auth-password');
+    const btn = qs('btn-toggle-password');
+    btn.replaceChildren(icon('eye'));
+    btn.onclick = () => {
+        const hidden = input.type === 'password';
+        input.type = hidden ? 'text' : 'password';
+        btn.replaceChildren(icon(hidden ? 'eye-off' : 'eye'));
+        const label = hidden ? 'Ẩn mật khẩu' : 'Hiện mật khẩu';
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+    };
+})();
+
 // ---------- Consent ----------
 
 qs('btn-accept-consent').onclick = async () => {

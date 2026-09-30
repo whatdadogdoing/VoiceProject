@@ -153,6 +153,25 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .mic-meter { height: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
 .mic-meter-fill { height: 100%; width: 0%; background: var(--accent); }
 
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 40px; }
+
+.btn-toggle-password {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-faint);
+}
+.btn-toggle-password:hover { color: var(--text); background: var(--surface); }
+.btn-toggle-password .icon { width: 16px; height: 16px; margin: 0; }
+
 .phrase-wrap { position: relative; margin-bottom: 8px; }
 
 .phrase-box {
