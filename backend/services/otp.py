@@ -21,16 +21,20 @@ OTP_TTL_SECONDS = 300
 # guesses at MAX_OTP_ATTEMPTS regardless of resends or source IP.
 OTP_FAIL_WINDOW_SECONDS = 3600
 
-mail_config = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
-    MAIL_FROM=os.getenv("MAIL_FROM"),
-    MAIL_PORT=587,
-    MAIL_SERVER="smtp.gmail.com",
-    MAIL_STARTTLS=True,
-    MAIL_SSL_TLS=False,
-    MAIL_DEBUG=False
-)
+# Built fresh per call rather than once at import time, so importing this
+# module (as a test that exercises the real OTP logic has to) doesn't require
+# real mail credentials to be set.
+def _mail_config() -> ConnectionConfig:
+    return ConnectionConfig(
+        MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
+        MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
+        MAIL_FROM=os.getenv("MAIL_FROM"),
+        MAIL_PORT=587,
+        MAIL_SERVER="smtp.gmail.com",
+        MAIL_STARTTLS=True,
+        MAIL_SSL_TLS=False,
+        MAIL_DEBUG=False
+    )
 
 
 async def send_otp(user_id: str, email: str) -> None:
@@ -48,7 +52,7 @@ async def send_otp(user_id: str, email: str) -> None:
         body=f"Mã OTP của bạn là: {code}\nMã có hiệu lực trong 5 phút.",
         subtype=MessageType.plain
     )
-    await FastMail(mail_config).send_message(message)
+    await FastMail(_mail_config()).send_message(message)
 
 
 async def verify_otp(user_id: str, code: str) -> bool:

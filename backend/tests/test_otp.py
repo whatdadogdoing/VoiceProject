@@ -8,6 +8,7 @@ requesting fresh codes to get a fresh guessing budget each time, or simply
 switch IP to reset the per-IP limiter itself.
 """
 import pytest
+from fastapi_mail import FastMail
 
 from services import otp
 
@@ -15,6 +16,16 @@ from services import otp
 @pytest.fixture(autouse=True)
 def _redis(monkeypatch, fake_redis):
     monkeypatch.setattr(otp, "get_redis", lambda: fake_redis)
+    # send_otp() builds a real ConnectionConfig and calls FastMail for real;
+    # give it valid-looking dummy credentials and stub the actual network call
+    # so these tests exercise the OTP logic without hitting Gmail's SMTP.
+    monkeypatch.setenv("MAIL_USERNAME", "test@example.com")
+    monkeypatch.setenv("MAIL_PASSWORD", "test-password")
+    monkeypatch.setenv("MAIL_FROM", "test@example.com")
+
+    async def _no_real_email(self, *_args, **_kwargs):
+        pass
+    monkeypatch.setattr(FastMail, "send_message", _no_real_email)
 
 
 async def _stored_code(fake_redis, user_id="user-1"):
