@@ -1,4 +1,4 @@
-# 🎙️ VoiceProject
+# VoiceProject
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-black?logo=fastapi)
@@ -14,25 +14,25 @@ A Word version of the technical documentation (features, data model, setup, meas
 
 ---
 
-## ✨ Features
+## Features
 
 | | |
 |---|---|
-| 🗣️ **Speaker verification** | [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) embeddings, cosine similarity vs. a stored voiceprint |
-| 🕵️ **Anti-spoofing** | [AASIST-L](https://github.com/clovaai/aasist), a graph-attention deepfake detector pretrained on ASVspoof2019, running on ONNX Runtime (~2.6x faster than raw PyTorch on CPU) |
-| 🎙️ **Server-side phrase verification** | Offline [Whisper](https://github.com/SYSTRAN/faster-whisper) speech-to-text checks what was actually said in the audio — PhoWhisper-base (Whisper tuned for Vietnamese) first (~3 s), Whisper `small` as a second opinion only when it rejects — and the client's own transcript is never trusted for this |
-| 📧 **Email OTP 2FA** | 6-digit code, auto-advancing input boxes, auto-submits — no confirm button |
-| 🔁 **Random challenge phrases** | a phrase is not reissued to a user until the whole 200-phrase pool has been used → resists replay attacks |
-| 🔢 **Random code (optional)** | a fresh 4-digit number to read aloud after the phrase, checked in the same recording — closes the replay gap a finite phrase pool leaves (`VERIFY_CODE_ENABLED`, off by default) |
-| 🔒 **Persistent fraud lockout** | 3 spoof detections in 30 min locks voice auth *indefinitely* — no waiting it out |
-| 🆘 **Password + email recovery** | unlocks the account, or re-enrolls a voice that stopped cooperating |
-| 🔄 **Blue-green re-enrollment** | new voiceprint fully validated before the old one is ever removed |
-| 🛡️ **Hardened auth plumbing** | non-spoofable client IP, account-level login lockout, logout that ends the session and revokes the post-MFA token, persisted per-browser device id |
-| 🧪 **Fake Voice Lab** | clone your own voice and attack your own `/verify` endpoint to test it |
+| **Speaker verification** | [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) embeddings, cosine similarity vs. a stored voiceprint |
+| **Anti-spoofing** | [AASIST-L](https://github.com/clovaai/aasist), a graph-attention deepfake detector pretrained on ASVspoof2019, running on ONNX Runtime (~2.6x faster than raw PyTorch on CPU) |
+| **Server-side phrase verification** | Offline [Whisper](https://github.com/SYSTRAN/faster-whisper) speech-to-text checks what was actually said in the audio — PhoWhisper-base (Whisper tuned for Vietnamese) first (~3 s), Whisper `small` as a second opinion only when it rejects — and the client's own transcript is never trusted for this |
+| **Email OTP 2FA** | 6-digit code, auto-advancing input boxes, auto-submits — no confirm button |
+| **Random challenge phrases** | a phrase is not reissued to a user until the whole 200-phrase pool has been used → resists replay attacks |
+| **Random code (optional)** | a fresh 4-digit number to read aloud after the phrase, checked in the same recording — closes the replay gap a finite phrase pool leaves (`VERIFY_CODE_ENABLED`, off by default) |
+| **Persistent fraud lockout** | 3 spoof detections in 30 min locks voice auth *indefinitely* — no waiting it out |
+| **Password + email recovery** | unlocks the account, or re-enrolls a voice that stopped cooperating |
+| **Blue-green re-enrollment** | new voiceprint fully validated before the old one is ever removed |
+| **Hardened auth plumbing** | non-spoofable client IP, account-level login lockout, logout that ends the session and revokes the post-MFA token, persisted per-browser device id |
+| **Fake Voice Lab** | clone your own voice and attack your own `/verify` endpoint to test it |
 
 ---
 
-## 🔄 Authentication Flow
+## Authentication Flow
 
 ```mermaid
 sequenceDiagram
@@ -53,13 +53,13 @@ sequenceDiagram
     AI-->>BE: scores
 
     alt spoof detected, 3rd time in 30 min
-        BE-->>FE: 🔒 fraud_lockout (see below)
+        BE-->>FE: fraud_lockout (see below)
     else voice + anti-spoofing pass
         BE-->>FE: mfa_required
         FE->>BE: POST /otp/send
         U->>FE: 6-digit email OTP
         FE->>BE: POST /otp/verify
-        BE-->>FE: ✅ access_token
+        BE-->>FE: access_token
     end
 ```
 
@@ -69,21 +69,21 @@ sequenceDiagram
 
 ---
 
-## 🔒 Fraud Lockout & Recovery
+## Fraud Lockout & Recovery
 
 The lockout **does not expire on a timer** — that's the point. An attacker who trips it can't just wait and try again; only proving account ownership through a separate channel (email) lifts it.
 
 ```mermaid
 flowchart TD
-    A["🎤 Voice verify attempt"] --> B{"Spoof score ≥ 0.5?"}
+    A["Voice verify attempt"] --> B{"Spoof score ≥ 0.5?"}
     B -- No --> C{"Speaker match + risk OK?"}
-    C -- Yes --> D["✅ mfa_required → OTP"]
-    C -- No --> E["❌ Rejected: mismatch / suspicious context"]
+    C -- Yes --> D["mfa_required → OTP"]
+    C -- No --> E["Rejected: mismatch / suspicious context"]
     B -- Yes --> F{"3rd spoof detection in 30 min?"}
-    F -- No --> G["⚠️ Rejected: spoofing_detected — tries left shown"]
-    F -- Yes --> H["🔒 Account LOCKED — persists indefinitely"]
+    F -- No --> G["Rejected: spoofing_detected — tries left shown"]
+    F -- Yes --> H["Account LOCKED — persists indefinitely"]
     H --> I["Recovery: password session + fresh email OTP"]
-    I --> J["🔓 Lock cleared → back to normal verify"]
+    I --> J["Lock cleared → back to normal verify"]
 ```
 
 The lock is read by `/verify` only. It does not gate enrollment, so a JWT issued before the account was locked still reaches `/enroll/*` (with a consent record it would be let through), and if the Redis data is lost the lock is gone, though the next spoof detection re-arms it from the attempts in Postgres.
@@ -92,11 +92,11 @@ The same recovery endpoints (password + email OTP, no voice needed) also cover a
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    Browser(["🌐 Browser"]) -->|":3000"| FE["frontend/<br/>nginx + static JS"]
+    Browser(["Browser"]) -->|":3000"| FE["frontend/<br/>nginx + static JS"]
     FE -->|"/api/* proxy"| BE["backend/<br/>FastAPI"]
     BE --> PG[("Postgres<br/>users · voiceprints · attempts")]
     BE --> RD[("Redis<br/>sessions · OTP · fraud locks")]
@@ -121,7 +121,7 @@ flowchart LR
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 cp .env.example .env   # fill in real values: Gmail app password, JWT secret, etc.
@@ -152,7 +152,7 @@ There is no database step: the backend creates the tables itself when it starts 
 
 ---
 
-## 🗄️ Database
+## Database
 
 **Nothing to set up by hand.** `docker compose up -d` starts Postgres 16 with an empty database, and when the backend starts it builds the schema itself (`backend/models/migrate.py`, called from `main.py` before anything else). One line in `docker compose logs backend` says what it found:
 
@@ -213,21 +213,21 @@ docker compose exec -e MIGRATION_TEST_DSN=postgresql://user:password@postgres/vo
 
 ---
 
-## 🧪 Fake Voice Lab
+## Fake Voice Lab
 
 *The premise: if an attacker obtained a short recording of a user's voice, could a commodity zero-shot voice-cloning model clone it convincingly enough to beat this app's own defenses?*
 
 ```mermaid
 flowchart LR
-    A["🎙️ Record your<br/>reference voice"] --> B["✍️ Type any sentence"]
-    B --> C["🤖 VieNeu-TTS clones<br/>your voice"]
+    A["Record your<br/>reference voice"] --> B["Type any sentence"]
+    B --> C["VieNeu-TTS clones<br/>your voice"]
     C --> D{"What next?"}
-    D -->|"just listening"| E["💾 Save as WAV/MP3/MP4/<br/>M4A/OGG/FLAC, any folder"]
-    D -->|"real attack test"| F["🔑 Log into your<br/>real account"]
+    D -->|"just listening"| E["Save as WAV/MP3/MP4/<br/>M4A/OGG/FLAC, any folder"]
+    D -->|"real attack test"| F["Log into your<br/>real account"]
     F --> G["Fetch the LIVE random<br/>challenge phrase"]
     G --> H["Clone exactly that phrase"]
     H --> I["Submit to real /verify"]
-    I --> J["📊 See if AASIST-L<br/>caught it"]
+    I --> J["See if AASIST-L<br/>caught it"]
 ```
 
 The attack test exercises the full defense stack, not just the spoof detector in isolation: a submitted clone still has to pass speaker verification (does the embedding match the enrolled voiceprint?), server-side phrase verification (does the speech-to-text transcript of the clone actually match the live challenge phrase?), and AASIST-L's spoof score — the same three checks a real forged attempt against `/verify` would have to clear.
@@ -240,15 +240,15 @@ Most open Vietnamese voice-cloning models are built on large architectures that 
 
 | # | Model | What happened | Verdict |
 |---|---|---|---|
-| 1 | **viXTTS** (Coqui XTTS-v2 fine-tuned for Vietnamese) | Produced convincing clones, but XTTS-v2's pipeline (a GPT-style acoustic model plus a vocoder) is heavy without GPU offload — a single inference call pushed memory usage high enough to trigger **31GB** of swap, thrashing disk I/O until the process became unusable | ❌ Needs a GPU to be practical |
-| 2 | **v-tts / VALTEC-TTS** | Advertised as a lightweight alternative (~74.8M parameters, small enough for CPU inference) | ❌ The model weights returned an HTTP 401 — the hosting repository isn't actually publicly downloadable despite being advertised as open |
-| 3 | **VieNeu-TTS** | Ships a torch-free ONNX CPU inference path with a small (~285MB) footprint, so it doesn't need a full PyTorch/CUDA-oriented stack just to run | ✅ **~14s/sentence, reliable, and light enough to run alongside the rest of the app (Resemblyzer, AASIST-L, Postgres, Redis) on the same machine** |
+| 1 | **viXTTS** (Coqui XTTS-v2 fine-tuned for Vietnamese) | Produced convincing clones, but XTTS-v2's pipeline (a GPT-style acoustic model plus a vocoder) is heavy without GPU offload — a single inference call pushed memory usage high enough to trigger **31GB** of swap, thrashing disk I/O until the process became unusable | Needs a GPU to be practical |
+| 2 | **v-tts / VALTEC-TTS** | Advertised as a lightweight alternative (~74.8M parameters, small enough for CPU inference) | The model weights returned an HTTP 401 — the hosting repository isn't actually publicly downloadable despite being advertised as open |
+| 3 | **VieNeu-TTS** | Ships a torch-free ONNX CPU inference path with a small (~285MB) footprint, so it doesn't need a full PyTorch/CUDA-oriented stack just to run | **~14s/sentence, reliable, and light enough to run alongside the rest of the app (Resemblyzer, AASIST-L, Postgres, Redis) on the same machine** |
 
 The deciding factor across all three wasn't voice quality — it was whether the model could run reliably on CPU-only hardware without starving everything else on the box. VieNeu-TTS was the first one that did.
 
 ---
 
-## 📝 Notes
+## Notes
 
 - AASIST-L was trained on studio-quality ASVspoof2019 audio. Real browser-recorded audio shifted its scores enough to cause false "spoofing detected" rejections on genuine speech; the recorder explicitly disables the browser's echo-cancellation/noise-suppression/AGC to stay closer to what the model expects. Measuring it later showed the dominant factor is plain **loudness**, not codec compression — see "Measured on real recordings" below — so the server also normalizes speech level before scoring.
 - AASIST-L runs from a PyTorch→ONNX export (`backend/scripts/export_aasist_onnx.py`) instead of raw PyTorch — verified numerically identical (< 1e-8 max diff on random inputs) and ~2.6x faster per call (983ms → 378ms on 2 CPU threads), which matters on the resource-constrained hardware below.
@@ -285,7 +285,7 @@ The deciding factor across all three wasn't voice quality — it was whether the
 
 ---
 
-## 📄 License
+## License
 
 The source code and documentation in this repository are released under the [MIT License](LICENSE), © 2026 Nguyễn Quang Bình.
 
