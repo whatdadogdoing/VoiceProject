@@ -28,3 +28,7 @@ docs/
 backend/eval_data/
 backend/eval_results/
 backend/_smoke_eval/
+
+# archify skill's per-request scratch working folders (candidate.json, receipts, screenshots);
+# the finished diagram gets copied into assets/ instead of being committed from here
+.archify/

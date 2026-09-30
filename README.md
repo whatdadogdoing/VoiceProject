@@ -103,6 +103,12 @@ flowchart LR
     FVL["fake-voice-lab/<br/>standalone tool · :5001"] -.->|"server-to-server<br/>(no CORS involved)"| BE
 ```
 
+The same architecture, generated from the real files (`docker-compose.yml`, `frontend/nginx.conf`, `backend/schema.sql`, `backend/services/redis_client.py`) with [Archify](https://github.com/tt-a1i/archify), each box citing exactly where it came from:
+
+![VoiceProject architecture diagram](assets/architecture-diagram.png)
+
+The interactive version (`assets/architecture-diagram.html`, open it locally) has dark mode, zoom, search, and an in-browser PNG/SVG export.
+
 | Path | Responsibility |
 |---|---|
 | `backend/routers/auth.py` | register / login (password only) / logout (ends the session, revokes the JWT) |
