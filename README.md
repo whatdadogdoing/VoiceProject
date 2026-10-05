@@ -98,8 +98,6 @@ Generated from the real files (`docker-compose.yml`, `frontend/nginx.conf`, `bac
 
 ![VoiceProject architecture diagram](assets/architecture-diagram.png)
 
-The interactive version (`assets/architecture-diagram.html`, open it locally) has dark mode, zoom, search, and an in-browser PNG/SVG export.
-
 | Path | Responsibility |
 |---|---|
 | `backend/routers/auth.py` | register / login (password only) / logout (ends the session, revokes the JWT) |
